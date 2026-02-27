@@ -23,7 +23,7 @@ type tarFileEntry struct {
 
 func openTar(content io.Reader, compression string) (Reader, error) {
 	// Wrap with decompressor if needed
-	var r io.Reader = content
+	r := io.Reader(content)
 
 	switch compression {
 	case "gzip":
@@ -31,7 +31,7 @@ func openTar(content io.Reader, compression string) (Reader, error) {
 		if err != nil {
 			return nil, fmt.Errorf("opening gzip: %w", err)
 		}
-		defer gz.Close()
+		defer func() { _ = gz.Close() }()
 		r = gz
 	case "bzip2":
 		r = bzip2.NewReader(content)

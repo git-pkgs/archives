@@ -128,10 +128,10 @@ func createTestZip() []byte {
 
 	for _, file := range files {
 		f, _ := w.Create(file.name)
-		f.Write([]byte(file.content))
+		_, _ = f.Write([]byte(file.content))
 	}
 
-	w.Close()
+	_ = w.Close()
 	return buf.Bytes()
 }
 
@@ -141,7 +141,7 @@ func TestZipReader(t *testing.T) {
 	if err != nil {
 		t.Fatalf("openZip failed: %v", err)
 	}
-	defer reader.Close()
+	defer func() { _ = reader.Close() }()
 
 	// Test List
 	files, err := reader.List()
@@ -166,7 +166,7 @@ func TestZipReader(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Extract failed: %v", err)
 	}
-	defer rc.Close()
+	defer func() { _ = rc.Close() }()
 
 	content, _ := io.ReadAll(rc)
 	if string(content) != "# Test Package" {
@@ -202,12 +202,12 @@ func createTestTarGz() []byte {
 			Mode:    0644,
 			ModTime: time.Now(),
 		}
-		tw.WriteHeader(header)
-		tw.Write([]byte(file.content))
+		_ = tw.WriteHeader(header)
+		_, _ = tw.Write([]byte(file.content))
 	}
 
-	tw.Close()
-	gw.Close()
+	_ = tw.Close()
+	_ = gw.Close()
 	return buf.Bytes()
 }
 
@@ -217,7 +217,7 @@ func TestTarReader(t *testing.T) {
 	if err != nil {
 		t.Fatalf("openTar failed: %v", err)
 	}
-	defer reader.Close()
+	defer func() { _ = reader.Close() }()
 
 	// Test List
 	files, err := reader.List()
@@ -242,7 +242,7 @@ func TestTarReader(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Extract failed: %v", err)
 	}
-	defer rc.Close()
+	defer func() { _ = rc.Close() }()
 
 	content, _ := io.ReadAll(rc)
 	if !strings.Contains(string(content), "test") {
@@ -257,7 +257,7 @@ func TestOpen(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open zip failed: %v", err)
 	}
-	reader.Close()
+	_ = reader.Close()
 
 	// Test TAR.GZ
 	tgzData := createTestTarGz()
@@ -265,7 +265,7 @@ func TestOpen(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open tar.gz failed: %v", err)
 	}
-	reader.Close()
+	_ = reader.Close()
 
 	// Test unsupported format
 	_, err = Open("test.unknown", bytes.NewReader([]byte("data")))
@@ -280,7 +280,7 @@ func TestZipListDir(t *testing.T) {
 	if err != nil {
 		t.Fatalf("openZip failed: %v", err)
 	}
-	defer reader.Close()
+	defer func() { _ = reader.Close() }()
 
 	// Test listing src directory
 	srcFiles, err := reader.ListDir("src")
@@ -329,16 +329,16 @@ func TestOpenWithPrefix(t *testing.T) {
 
 	for _, file := range files {
 		f, _ := w.Create(file.name)
-		f.Write([]byte(file.content))
+		_, _ = f.Write([]byte(file.content))
 	}
-	w.Close()
+	_ = w.Close()
 
 	// Open with prefix stripping
 	reader, err := OpenWithPrefix("test.zip", bytes.NewReader(buf.Bytes()), "package/")
 	if err != nil {
 		t.Fatalf("OpenWithPrefix failed: %v", err)
 	}
-	defer reader.Close()
+	defer func() { _ = reader.Close() }()
 
 	// List files - should not include package/ prefix
 	files2, err := reader.List()
@@ -374,7 +374,7 @@ func TestOpenWithPrefix(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Extract failed: %v", err)
 	}
-	defer rc.Close()
+	defer func() { _ = rc.Close() }()
 
 	content, _ := io.ReadAll(rc)
 	if string(content) != "# Test" {
@@ -399,18 +399,18 @@ func TestGetStripPrefixNpm(t *testing.T) {
 			Size: int64(len(content)),
 			Mode: 0644,
 		}
-		tw.WriteHeader(header)
-		tw.Write([]byte(content))
+		_ = tw.WriteHeader(header)
+		_, _ = tw.Write([]byte(content))
 	}
-	tw.Close()
-	gw.Close()
+	_ = tw.Close()
+	_ = gw.Close()
 
 	// Open with npm prefix stripping
 	reader, err := OpenWithPrefix("test.tgz", bytes.NewReader(buf.Bytes()), "package/")
 	if err != nil {
 		t.Fatalf("OpenWithPrefix failed: %v", err)
 	}
-	defer reader.Close()
+	defer func() { _ = reader.Close() }()
 
 	// List root - should see package.json and index.js directly
 	rootFiles, err := reader.ListDir("")

@@ -55,6 +55,22 @@ reader, _ := archives.OpenWithPrefix("pkg.tgz", f, "package/")
 // files are now accessible without the package/ prefix
 ```
 
+### Comparing versions
+
+The `diff` subpackage compares two archives and produces unified diffs. It classifies each file as added, deleted, modified, or binary, and includes line-level diff output for text files.
+
+```go
+import "github.com/git-pkgs/archives/diff"
+
+result, _ := diff.Compare(oldReader, newReader)
+for _, f := range result.Files {
+	fmt.Printf("%s %s (+%d -%d)\n", f.Type, f.Path, f.LinesAdded, f.LinesDeleted)
+	if f.Diff != "" {
+		fmt.Println(f.Diff)
+	}
+}
+```
+
 ## Supported formats
 
 - `.zip`, `.jar`, `.whl`, `.nupkg`, `.egg` (ZIP-based)

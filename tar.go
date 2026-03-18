@@ -21,7 +21,7 @@ type tarFileEntry struct {
 	data []byte
 }
 
-func openTar(content io.Reader, compression string) (Reader, error) {
+func openTar(content io.Reader, compression string) (*tarReader, error) {
 	// Wrap with decompressor if needed
 	r := io.Reader(content)
 

@@ -13,7 +13,7 @@ type gemReader struct {
 	dataReader Reader // The inner data.tar.gz reader
 }
 
-func openGem(content io.Reader) (Reader, error) {
+func openGem(content io.Reader) (*gemReader, error) {
 	// Read the gem file as a tar archive
 	tr := tar.NewReader(content)
 

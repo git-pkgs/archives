@@ -82,21 +82,21 @@ func TestCompare(t *testing.T) {
 	}
 
 	// Check deleted file
-	if f, ok := fileMap["deleted.txt"]; !ok || f.Type != "deleted" {
+	if f, ok := fileMap["deleted.txt"]; !ok || f.Type != TypeDeleted {
 		t.Error("deleted.txt should be marked as deleted")
 	}
 
 	// Check added file
-	if f, ok := fileMap["added.txt"]; !ok || f.Type != "added" {
+	if f, ok := fileMap["added.txt"]; !ok || f.Type != TypeAdded {
 		t.Error("added.txt should be marked as added")
 	}
 
 	// Check modified files
-	if f, ok := fileMap["README.md"]; !ok || f.Type != "modified" {
+	if f, ok := fileMap["README.md"]; !ok || f.Type != TypeModified {
 		t.Error("README.md should be marked as modified")
 	}
 
-	if f, ok := fileMap["src/main.go"]; !ok || f.Type != "modified" {
+	if f, ok := fileMap["src/main.go"]; !ok || f.Type != TypeModified {
 		t.Error("src/main.go should be marked as modified")
 	}
 }

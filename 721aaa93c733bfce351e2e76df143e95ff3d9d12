@@ -1,0 +1,33 @@
+diff/diff.go
+  14310083eb1b8c17 15-25,101-104,106-107,109,111,113-114,123-137,139-140,143,145-153,155-165,187-188
+tar.go
+  14310083eb1b8c17 24
+gem.go
+  14310083eb1b8c17 16
+archives.go
+  14310083eb1b8c17 51,83
+diff/diff_test.go
+  14310083eb1b8c17 85,90,95,99
+zip.go
+  14310083eb1b8c17 16
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.15",
+  "base_commit_sha": "721aaa93c733bfce351e2e76df143e95ff3d9d12",
+  "prompts": {
+    "14310083eb1b8c17": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "797cc337-254b-46f1-bad8-5473fc0404f8",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Andrew Nesbitt <andrewnez@gmail.com>",
+      "messages": [],
+      "total_additions": 87,
+      "total_deletions": 70,
+      "accepted_lines": 78,
+      "overriden_lines": 0
+    }
+  }
+}

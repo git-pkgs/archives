@@ -12,6 +12,17 @@ import (
 	"github.com/git-pkgs/archives"
 )
 
+const (
+	// binaryCheckSize is the number of bytes to check for null bytes when
+	// determining if content is binary.
+	binaryCheckSize = 8192
+
+	// Diff type constants for FileDiff.Type.
+	TypeModified = "modified"
+	TypeAdded    = "added"
+	TypeDeleted  = "deleted"
+)
+
 // FileDiff represents the diff for a single file.
 type FileDiff struct {
 	Path      string `json:"path"`
@@ -87,67 +98,71 @@ func Compare(oldReader, newReader archives.Reader) (*CompareResult, error) {
 		oldExists := oldMap[path]
 		newExists := newMap[path]
 
-		var fileDiff FileDiff
+		fileDiff, ok := compareFile(path, oldExists, newExists, oldReader, newReader)
+		if !ok {
+			continue
+		}
 
-		if oldExists.Path != "" && newExists.Path == "" {
-			// File was deleted
-			fileDiff = FileDiff{
-				Path: path,
-				Type: "deleted",
-			}
+		switch fileDiff.Type {
+		case TypeDeleted:
 			result.FilesDeleted++
-		} else if oldExists.Path == "" && newExists.Path != "" {
-			// File was added
-			fileDiff = FileDiff{
-				Path: path,
-				Type: "added",
-			}
+		case TypeAdded:
 			result.FilesAdded++
-
-			// Try to get content for added files
-			if content, err := readFileContent(newReader, path); err == nil {
-				if isBinary(content) {
-					fileDiff.IsBinary = true
-				} else {
-					fileDiff.Diff = generateAddedDiff(path, content)
-					fileDiff.LinesAdded = countLines(content)
-				}
-			}
-		} else {
-			// File exists in both - check if modified
-			oldContent, err1 := readFileContent(oldReader, path)
-			newContent, err2 := readFileContent(newReader, path)
-
-			if err1 != nil || err2 != nil {
-				continue // Skip files we can't read
-			}
-
-			if bytes.Equal(oldContent, newContent) {
-				continue // No change
-			}
-
-			fileDiff = FileDiff{
-				Path: path,
-				Type: "modified",
-			}
+		case TypeModified:
 			result.FilesChanged++
-
-			if isBinary(oldContent) || isBinary(newContent) {
-				fileDiff.IsBinary = true
-			} else {
-				diffText, added, deleted := generateUnifiedDiff(path, oldContent, newContent)
-				fileDiff.Diff = diffText
-				fileDiff.LinesAdded = added
-				fileDiff.LinesDeleted = deleted
-				result.TotalAdded += added
-				result.TotalDeleted += deleted
-			}
+			result.TotalAdded += fileDiff.LinesAdded
+			result.TotalDeleted += fileDiff.LinesDeleted
 		}
 
 		result.Files = append(result.Files, fileDiff)
 	}
 
 	return result, nil
+}
+
+// compareFile compares a single file between old and new archives.
+// Returns the diff and false if the file should be skipped.
+func compareFile(path string, oldInfo, newInfo archives.FileInfo, oldReader, newReader archives.Reader) (FileDiff, bool) {
+	inOld := oldInfo.Path != ""
+	inNew := newInfo.Path != ""
+
+	switch {
+	case inOld && !inNew:
+		return FileDiff{Path: path, Type: TypeDeleted}, true
+
+	case !inOld && inNew:
+		fd := FileDiff{Path: path, Type: TypeAdded}
+		if content, err := readFileContent(newReader, path); err == nil {
+			if isBinary(content) {
+				fd.IsBinary = true
+			} else {
+				fd.Diff = generateAddedDiff(path, content)
+				fd.LinesAdded = countLines(content)
+			}
+		}
+		return fd, true
+
+	default:
+		oldContent, err1 := readFileContent(oldReader, path)
+		newContent, err2 := readFileContent(newReader, path)
+		if err1 != nil || err2 != nil {
+			return FileDiff{}, false
+		}
+		if bytes.Equal(oldContent, newContent) {
+			return FileDiff{}, false
+		}
+
+		fd := FileDiff{Path: path, Type: TypeModified}
+		if isBinary(oldContent) || isBinary(newContent) {
+			fd.IsBinary = true
+		} else {
+			diffText, added, deleted := generateUnifiedDiff(path, oldContent, newContent)
+			fd.Diff = diffText
+			fd.LinesAdded = added
+			fd.LinesDeleted = deleted
+		}
+		return fd, true
+	}
 }
 
 // readFileContent reads a file's content from an archive reader.
@@ -169,8 +184,8 @@ func isBinary(content []byte) bool {
 
 	// Check first 8KB for null bytes
 	checkLen := len(content)
-	if checkLen > 8192 {
-		checkLen = 8192
+	if checkLen > binaryCheckSize {
+		checkLen = binaryCheckSize
 	}
 
 	for i := 0; i < checkLen; i++ {

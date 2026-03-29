@@ -13,7 +13,7 @@ type zipReader struct {
 	reader *zip.Reader
 }
 
-func openZip(content io.Reader) (Reader, error) {
+func openZip(content io.Reader) (*zipReader, error) {
 	// Read entire content into memory
 	data, err := io.ReadAll(content)
 	if err != nil {

@@ -48,6 +48,7 @@ type Reader interface {
 // Open creates an archive reader for the given content.
 // The filename is used to detect the archive format.
 // The content reader will be read entirely into memory.
+//nolint:ireturn // factory function returning interface by design
 func Open(filename string, content io.Reader) (Reader, error) {
 	format := detectFormat(filename)
 	if format == "" {
@@ -79,6 +80,7 @@ func Open(filename string, content io.Reader) (Reader, error) {
 
 // OpenWithPrefix opens an archive and strips the given prefix from all paths.
 // This is useful for npm packages which wrap content in a "package/" directory.
+//nolint:ireturn // factory function returning interface by design
 func OpenWithPrefix(filename string, content io.Reader, stripPrefix string) (Reader, error) {
 	reader, err := Open(filename, content)
 	if err != nil {

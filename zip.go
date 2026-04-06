@@ -54,6 +54,9 @@ func (z *zipReader) ListDir(dirPath string) ([]FileInfo, error) {
 
 		// Check if this file/dir is directly in the requested directory
 		if isInDir(path, dirPath) {
+			if f.FileInfo().IsDir() {
+				seenDirs[path] = true
+			}
 			files = append(files, fileInfoFromZip(f))
 			continue
 		}

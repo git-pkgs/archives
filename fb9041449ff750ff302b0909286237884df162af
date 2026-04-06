@@ -1,0 +1,27 @@
+zip.go
+  8c7ef527725f0770 57-59
+archives_test.go
+  8c7ef527725f0770 9,386-445
+tar.go
+  8c7ef527725f0770 103-105
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.5",
+  "base_commit_sha": "fb9041449ff750ff302b0909286237884df162af",
+  "prompts": {
+    "8c7ef527725f0770": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "43e6e8a2-3453-4d3e-9127-d98a7b6e54fa",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Andrew Nesbitt",
+      "messages": [],
+      "total_additions": 68,
+      "total_deletions": 1,
+      "accepted_lines": 67,
+      "overriden_lines": 0
+    }
+  }
+}

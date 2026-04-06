@@ -1,0 +1,23 @@
+archives_test.go
+  67cf351b69c739a4 401-409,429-482,493,495,497-499,501-502,504-520,522
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.5",
+  "base_commit_sha": "b590339071ca270b6d4388295cbefcbf38baa4c3",
+  "prompts": {
+    "67cf351b69c739a4": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "145a8dde-8f3c-44ed-afc2-ab6206038103",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Andrew Nesbitt",
+      "messages": [],
+      "total_additions": 88,
+      "total_deletions": 9,
+      "accepted_lines": 88,
+      "overriden_lines": 0
+    }
+  }
+}

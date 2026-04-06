@@ -398,6 +398,15 @@ func createTestZipWithDirEntries() []byte {
 	header.SetMode(0755 | os.ModeDir)
 	_, _ = w.CreateHeader(header)
 
+	// Add explicit src/ subdirectory entry
+	srcHeader := &zip.FileHeader{
+		Name:     "project-abc123/src/",
+		Method:   zip.Store,
+		Modified: time.Date(2026, 3, 30, 8, 14, 47, 0, time.UTC),
+	}
+	srcHeader.SetMode(0755 | os.ModeDir)
+	_, _ = w.CreateHeader(srcHeader)
+
 	// Add files inside that directory
 	files := []struct {
 		name    string
@@ -417,6 +426,60 @@ func createTestZipWithDirEntries() []byte {
 	return buf.Bytes()
 }
 
+// createTestTarGzWithDirEntries creates a tar.gz with explicit directory entries,
+// like GitHub tarball downloads produce.
+func createTestTarGzWithDirEntries() []byte {
+	buf := new(bytes.Buffer)
+	gw := gzip.NewWriter(buf)
+	tw := tar.NewWriter(gw)
+
+	// Add explicit directory entries
+	for _, dir := range []string{"project-abc123/", "project-abc123/src/"} {
+		_ = tw.WriteHeader(&tar.Header{
+			Typeflag: tar.TypeDir,
+			Name:     dir,
+			Mode:     0755,
+			ModTime:  time.Date(2026, 3, 30, 8, 14, 47, 0, time.UTC),
+		})
+	}
+
+	files := []struct {
+		name    string
+		content string
+	}{
+		{"project-abc123/README.md", "# Test"},
+		{"project-abc123/src/main.go", "package main"},
+		{"project-abc123/src/util.go", "package main"},
+	}
+
+	for _, file := range files {
+		_ = tw.WriteHeader(&tar.Header{
+			Name:    file.name,
+			Size:    int64(len(file.content)),
+			Mode:    0644,
+			ModTime: time.Date(2026, 3, 30, 8, 14, 47, 0, time.UTC),
+		})
+		_, _ = tw.Write([]byte(file.content))
+	}
+
+	_ = tw.Close()
+	_ = gw.Close()
+	return buf.Bytes()
+}
+
+func assertNoDuplicates(t *testing.T, label string, files []FileInfo) {
+	t.Helper()
+	seen := map[string]int{}
+	for _, f := range files {
+		seen[f.Path]++
+	}
+	for path, count := range seen {
+		if count > 1 {
+			t.Errorf("%s: %d entries for %q, want 1", label, count, path)
+		}
+	}
+}
+
 func TestZipListDirNoDuplicatesWithExplicitDirEntries(t *testing.T) {
 	data := createTestZipWithDirEntries()
 	reader, err := openZip(bytes.NewReader(data))
@@ -427,20 +490,36 @@ func TestZipListDirNoDuplicatesWithExplicitDirEntries(t *testing.T) {
 
 	files, err := reader.ListDir("")
 	if err != nil {
-		t.Fatalf("ListDir failed: %v", err)
+		t.Fatalf("ListDir root failed: %v", err)
 	}
+	assertNoDuplicates(t, "ListDir root", files)
 
-	// Should have exactly one entry for the top-level directory
-	seen := map[string]int{}
-	for _, f := range files {
-		seen[f.Path]++
+	files, err = reader.ListDir("project-abc123/")
+	if err != nil {
+		t.Fatalf("ListDir subdir failed: %v", err)
 	}
+	assertNoDuplicates(t, "ListDir project-abc123/", files)
+}
 
-	for path, count := range seen {
-		if count > 1 {
-			t.Errorf("ListDir root has %d entries for %q, want 1", count, path)
-		}
+func TestTarListDirNoDuplicatesWithExplicitDirEntries(t *testing.T) {
+	data := createTestTarGzWithDirEntries()
+	reader, err := openTar(bytes.NewReader(data), "gzip")
+	if err != nil {
+		t.Fatalf("openTar failed: %v", err)
 	}
+	defer func() { _ = reader.Close() }()
+
+	files, err := reader.ListDir("")
+	if err != nil {
+		t.Fatalf("ListDir root failed: %v", err)
+	}
+	assertNoDuplicates(t, "ListDir root", files)
+
+	files, err = reader.ListDir("project-abc123/")
+	if err != nil {
+		t.Fatalf("ListDir subdir failed: %v", err)
+	}
+	assertNoDuplicates(t, "ListDir project-abc123/", files)
 }
 
 func TestGetStripPrefixNpm(t *testing.T) {

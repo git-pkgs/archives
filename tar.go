@@ -100,6 +100,9 @@ func (t *tarReader) ListDir(dirPath string) ([]FileInfo, error) {
 
 		// Check if this file/dir is directly in the requested directory
 		if isInDir(path, dirPath) {
+			if f.info.IsDir {
+				seenDirs[path] = true
+			}
 			files = append(files, f.info)
 			continue
 		}

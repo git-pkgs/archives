@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"io"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -379,6 +380,66 @@ func TestOpenWithPrefix(t *testing.T) {
 	content, _ := io.ReadAll(rc)
 	if string(content) != "# Test" {
 		t.Errorf("Extract content = %q, want %q", string(content), "# Test")
+	}
+}
+
+// createTestZipWithDirEntries creates a zip with explicit directory entries,
+// like GitHub zipball downloads produce.
+func createTestZipWithDirEntries() []byte {
+	buf := new(bytes.Buffer)
+	w := zip.NewWriter(buf)
+
+	// Add explicit directory entry (GitHub zipballs do this)
+	header := &zip.FileHeader{
+		Name:     "project-abc123/",
+		Method:   zip.Store,
+		Modified: time.Date(2026, 3, 30, 8, 14, 47, 0, time.UTC),
+	}
+	header.SetMode(0755 | os.ModeDir)
+	_, _ = w.CreateHeader(header)
+
+	// Add files inside that directory
+	files := []struct {
+		name    string
+		content string
+	}{
+		{"project-abc123/README.md", "# Test"},
+		{"project-abc123/src/main.go", "package main"},
+		{"project-abc123/src/util.go", "package main"},
+	}
+
+	for _, file := range files {
+		f, _ := w.Create(file.name)
+		_, _ = f.Write([]byte(file.content))
+	}
+
+	_ = w.Close()
+	return buf.Bytes()
+}
+
+func TestZipListDirNoDuplicatesWithExplicitDirEntries(t *testing.T) {
+	data := createTestZipWithDirEntries()
+	reader, err := openZip(bytes.NewReader(data))
+	if err != nil {
+		t.Fatalf("openZip failed: %v", err)
+	}
+	defer func() { _ = reader.Close() }()
+
+	files, err := reader.ListDir("")
+	if err != nil {
+		t.Fatalf("ListDir failed: %v", err)
+	}
+
+	// Should have exactly one entry for the top-level directory
+	seen := map[string]int{}
+	for _, f := range files {
+		seen[f.Path]++
+	}
+
+	for path, count := range seen {
+		if count > 1 {
+			t.Errorf("ListDir root has %d entries for %q, want 1", count, path)
+		}
 	}
 }
 

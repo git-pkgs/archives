@@ -208,10 +208,10 @@ func generateSimpleDiff(path string, oldContent, newContent []byte) (string, int
 	oldLines := strings.Split(string(oldContent), "\n")
 	newLines := strings.Split(string(newContent), "\n")
 
-	// Simple line-by-line comparison (can be improved with Myers algorithm)
 	var buf strings.Builder
-	fmt.Fprintf(&buf, "--- a/%s\n", path)
-	fmt.Fprintf(&buf, "+++ b/%s\n", path)
+	safePath := sanitizeDiffPath(path)
+	fmt.Fprintf(&buf, "--- a/%s\n", safePath)
+	fmt.Fprintf(&buf, "+++ b/%s\n", safePath)
 
 	linesAdded := 0
 	linesDeleted := 0
@@ -301,8 +301,9 @@ func generateSimpleDiff(path string, oldContent, newContent []byte) (string, int
 // generateAddedDiff generates a diff for a newly added file.
 func generateAddedDiff(path string, content []byte) string {
 	var buf strings.Builder
+	safePath := sanitizeDiffPath(path)
 	buf.WriteString("--- /dev/null\n")
-	fmt.Fprintf(&buf, "+++ b/%s\n", path)
+	fmt.Fprintf(&buf, "+++ b/%s\n", safePath)
 
 	lines := bytes.Split(content, []byte("\n"))
 	fmt.Fprintf(&buf, "@@ -0,0 +1,%d @@\n", len(lines))
@@ -312,6 +313,12 @@ func generateAddedDiff(path string, content []byte) string {
 	}
 
 	return buf.String()
+}
+
+var diffPathReplacer = strings.NewReplacer("\n", "", "\r", "")
+
+func sanitizeDiffPath(path string) string {
+	return diffPathReplacer.Replace(path)
 }
 
 // countLines counts the number of lines in content.

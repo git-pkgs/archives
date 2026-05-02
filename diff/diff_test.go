@@ -252,3 +252,58 @@ func TestCompareBinaryFiles(t *testing.T) {
 		t.Error("binary files should not have diff content")
 	}
 }
+
+func TestSanitizeDiffPath(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"normal/path.go", "normal/path.go"},
+		{"has\nnewline", "hasnewline"},
+		{"has\r\ncrlf", "hascrlf"},
+		{"multi\n\n\nnewlines", "multinewlines"},
+		{"", ""},
+	}
+
+	for _, tt := range tests {
+		got := sanitizeDiffPath(tt.input)
+		if got != tt.want {
+			t.Errorf("sanitizeDiffPath(%q) = %q, want %q", tt.input, got, tt.want)
+		}
+	}
+}
+
+func TestDiffHeaderInjectionBlocked(t *testing.T) {
+	injectedPath := "evil.txt\n+++ b/etc/passwd\n@@ -0,0 +1 @@\n+root:x:0:0"
+	content := []byte("hello\n")
+
+	diff := generateAddedDiff(injectedPath, content)
+
+	headerCount := 0
+	for _, line := range strings.Split(diff, "\n") {
+		if strings.HasPrefix(line, "+++ ") {
+			headerCount++
+		}
+	}
+	if headerCount != 1 {
+		t.Errorf("expected 1 +++ header, got %d; newlines in path were not stripped", headerCount)
+	}
+}
+
+func TestUnifiedDiffHeaderInjectionBlocked(t *testing.T) {
+	injectedPath := "evil.txt\n--- a/etc/shadow"
+	oldContent := []byte("old\n")
+	newContent := []byte("new\n")
+
+	diff, _, _ := generateUnifiedDiff(injectedPath, oldContent, newContent)
+
+	minusCount := 0
+	for _, line := range strings.Split(diff, "\n") {
+		if strings.HasPrefix(line, "--- ") {
+			minusCount++
+		}
+	}
+	if minusCount != 1 {
+		t.Errorf("expected 1 --- header, got %d; newlines in path were not stripped", minusCount)
+	}
+}

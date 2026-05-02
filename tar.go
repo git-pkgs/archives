@@ -5,12 +5,17 @@ import (
 	"bytes"
 	"compress/bzip2"
 	"compress/gzip"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
 
 	"github.com/ulikunitz/xz"
 )
+
+var maxDecompressedSize int64 = 512 << 20 // 512 MiB
+
+var ErrDecompressLimit = errors.New("decompressed content exceeds size limit")
 
 type tarReader struct {
 	files []tarFileEntry
@@ -43,9 +48,9 @@ func openTar(content io.Reader, compression string) (*tarReader, error) {
 		r = xzReader
 	}
 
-	// Read all files into memory
 	tr := tar.NewReader(r)
 	var files []tarFileEntry
+	var totalSize int64
 
 	for {
 		header, err := tr.Next()
@@ -67,10 +72,15 @@ func openTar(content io.Reader, compression string) (*tarReader, error) {
 
 		var data []byte
 		if !info.IsDir {
-			data, err = io.ReadAll(tr)
+			remaining := maxDecompressedSize - totalSize
+			data, err = io.ReadAll(io.LimitReader(tr, remaining+1))
 			if err != nil {
 				return nil, fmt.Errorf("reading file %s: %w", header.Name, err)
 			}
+			if int64(len(data)) > remaining {
+				return nil, fmt.Errorf("%w: exceeds %d bytes", ErrDecompressLimit, maxDecompressedSize)
+			}
+			totalSize += int64(len(data))
 		}
 
 		files = append(files, tarFileEntry{

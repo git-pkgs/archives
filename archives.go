@@ -113,15 +113,28 @@ func OpenWithPrefix(filename string, content io.Reader, stripPrefix string) (Rea
 	if err != nil {
 		return nil, err
 	}
+	return wrapPrefix(reader, stripPrefix), nil
+}
 
-	if stripPrefix == "" {
-		return reader, nil
+// OpenBytesWithPrefix is like OpenWithPrefix but accepts the archive content as
+// a byte slice. The slice is retained (not copied) for the lifetime of the
+// Reader and must not be modified by the caller after this call.
+//
+//nolint:ireturn // factory function returning interface by design
+func OpenBytesWithPrefix(filename string, content []byte, stripPrefix string) (Reader, error) {
+	reader, err := OpenBytes(filename, content)
+	if err != nil {
+		return nil, err
 	}
+	return wrapPrefix(reader, stripPrefix), nil
+}
 
-	return &prefixStripper{
-		reader: reader,
-		prefix: stripPrefix,
-	}, nil
+//nolint:ireturn
+func wrapPrefix(reader Reader, stripPrefix string) Reader {
+	if stripPrefix == "" {
+		return reader
+	}
+	return &prefixStripper{reader: reader, prefix: stripPrefix}
 }
 
 // detectFormat determines archive format from filename extension.

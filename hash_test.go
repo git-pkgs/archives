@@ -11,6 +11,7 @@ import (
 	"crypto/sha256"
 	"crypto/sha512"
 	"encoding/hex"
+	"strings"
 	"testing"
 )
 
@@ -192,5 +193,38 @@ func TestOpenBytesDoesNotCopy(t *testing.T) {
 	zr := reader.(*zipReader)
 	if &zr.raw[0] != &data[0] {
 		t.Error("OpenBytes copied the input slice; expected it to retain the original backing array")
+	}
+}
+
+func TestOpenBytesWithPrefix(t *testing.T) {
+	data := createTestTarGz()
+	reader, err := OpenBytesWithPrefix("test.tgz", data, "lib/")
+	if err != nil {
+		t.Fatalf("OpenBytesWithPrefix failed: %v", err)
+	}
+	defer func() { _ = reader.Close() }()
+
+	files, err := reader.List()
+	if err != nil {
+		t.Fatalf("List failed: %v", err)
+	}
+	for _, f := range files {
+		if strings.HasPrefix(f.Path, "lib/") {
+			t.Errorf("path %q still has lib/ prefix", f.Path)
+		}
+	}
+
+	want := expectedDigests(data)[SHA256]
+	got, err := reader.Hash(SHA256)
+	if err != nil {
+		t.Fatalf("Hash failed: %v", err)
+	}
+	if got != want {
+		t.Errorf("Hash = %s, want %s", got, want)
+	}
+
+	inner := reader.(*prefixStripper).reader.(*tarReader)
+	if &inner.raw[0] != &data[0] {
+		t.Error("OpenBytesWithPrefix copied the input slice")
 	}
 }

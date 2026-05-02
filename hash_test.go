@@ -180,3 +180,17 @@ func TestOpenBytes(t *testing.T) {
 		t.Errorf("List returned %d files, want 4", len(files))
 	}
 }
+
+func TestOpenBytesDoesNotCopy(t *testing.T) {
+	data := createTestZip()
+	reader, err := OpenBytes("test.zip", data)
+	if err != nil {
+		t.Fatalf("OpenBytes failed: %v", err)
+	}
+	defer func() { _ = reader.Close() }()
+
+	zr := reader.(*zipReader)
+	if &zr.raw[0] != &data[0] {
+		t.Error("OpenBytes copied the input slice; expected it to retain the original backing array")
+	}
+}

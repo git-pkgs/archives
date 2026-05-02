@@ -10,7 +10,6 @@
 package archives
 
 import (
-	"bytes"
 	"fmt"
 	"io"
 	"path"
@@ -68,34 +67,41 @@ func Open(filename string, content io.Reader) (Reader, error) {
 		return nil, fmt.Errorf("reading archive content: %w", err)
 	}
 
-	var reader Reader
-
-	switch format {
-	case "zip":
-		reader, err = openZip(raw)
-	case "tar":
-		reader, err = openTar(raw, "")
-	case "tar.gz", "tgz":
-		reader, err = openTar(raw, "gzip")
-	case "tar.bz2":
-		reader, err = openTar(raw, "bzip2")
-	case "tar.xz":
-		reader, err = openTar(raw, "xz")
-	case "gem":
-		reader, err = openGem(raw)
-	default:
-		return nil, fmt.Errorf("unsupported format: %s", format)
-	}
-
-	return reader, err
+	return openRaw(format, raw)
 }
 
 // OpenBytes is like Open but accepts the archive content as a byte slice.
-// The slice is retained for the lifetime of the Reader to support Hash.
+// The slice is retained (not copied) for the lifetime of the Reader and
+// must not be modified by the caller after this call.
 //
 //nolint:ireturn // factory function returning interface by design
 func OpenBytes(filename string, content []byte) (Reader, error) {
-	return Open(filename, bytes.NewReader(content))
+	format := detectFormat(filename)
+	if format == "" {
+		return nil, fmt.Errorf("unsupported archive format: %s", filename)
+	}
+
+	return openRaw(format, content)
+}
+
+//nolint:ireturn
+func openRaw(format string, raw []byte) (Reader, error) {
+	switch format {
+	case "zip":
+		return openZip(raw)
+	case "tar":
+		return openTar(raw, "")
+	case "tar.gz", "tgz":
+		return openTar(raw, "gzip")
+	case "tar.bz2":
+		return openTar(raw, "bzip2")
+	case "tar.xz":
+		return openTar(raw, "xz")
+	case "gem":
+		return openGem(raw)
+	default:
+		return nil, fmt.Errorf("unsupported format: %s", format)
+	}
 }
 
 // OpenWithPrefix opens an archive and strips the given prefix from all paths.

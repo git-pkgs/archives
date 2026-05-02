@@ -140,7 +140,7 @@ func createTestZip() []byte {
 
 func TestZipReader(t *testing.T) {
 	data := createTestZip()
-	reader, err := openZip(bytes.NewReader(data))
+	reader, err := openZip(data)
 	if err != nil {
 		t.Fatalf("openZip failed: %v", err)
 	}
@@ -216,7 +216,7 @@ func createTestTarGz() []byte {
 
 func TestTarReader(t *testing.T) {
 	data := createTestTarGz()
-	reader, err := openTar(bytes.NewReader(data), "gzip")
+	reader, err := openTar(data, "gzip")
 	if err != nil {
 		t.Fatalf("openTar failed: %v", err)
 	}
@@ -279,7 +279,7 @@ func TestOpen(t *testing.T) {
 
 func TestZipListDir(t *testing.T) {
 	data := createTestZip()
-	reader, err := openZip(bytes.NewReader(data))
+	reader, err := openZip(data)
 	if err != nil {
 		t.Fatalf("openZip failed: %v", err)
 	}
@@ -484,7 +484,7 @@ func assertNoDuplicates(t *testing.T, label string, files []FileInfo) {
 
 func TestZipListDirNoDuplicatesWithExplicitDirEntries(t *testing.T) {
 	data := createTestZipWithDirEntries()
-	reader, err := openZip(bytes.NewReader(data))
+	reader, err := openZip(data)
 	if err != nil {
 		t.Fatalf("openZip failed: %v", err)
 	}
@@ -505,7 +505,7 @@ func TestZipListDirNoDuplicatesWithExplicitDirEntries(t *testing.T) {
 
 func TestTarListDirNoDuplicatesWithExplicitDirEntries(t *testing.T) {
 	data := createTestTarGzWithDirEntries()
-	reader, err := openTar(bytes.NewReader(data), "gzip")
+	reader, err := openTar(data, "gzip")
 	if err != nil {
 		t.Fatalf("openTar failed: %v", err)
 	}
@@ -591,7 +591,7 @@ func TestOpenTarRejectsDecompressBomb(t *testing.T) {
 	_ = tw.Close()
 	_ = gw.Close()
 
-	_, err := openTar(bytes.NewReader(buf.Bytes()), "gzip")
+	_, err := openTar(buf.Bytes(), "gzip")
 	if err == nil {
 		t.Fatal("expected error for oversized decompressed content")
 	}
@@ -619,7 +619,7 @@ func TestOpenTarAcceptsWithinLimit(t *testing.T) {
 	_ = tw.Close()
 	_ = gw.Close()
 
-	reader, err := openTar(bytes.NewReader(buf.Bytes()), "gzip")
+	reader, err := openTar(buf.Bytes(), "gzip")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -654,7 +654,7 @@ func TestOpenTarRejectsCumulativeOverflow(t *testing.T) {
 	_ = tw.Close()
 	_ = gw.Close()
 
-	_, err := openTar(bytes.NewReader(buf.Bytes()), "gzip")
+	_, err := openTar(buf.Bytes(), "gzip")
 	if err == nil {
 		t.Fatal("expected error when cumulative size exceeds limit")
 	}
@@ -695,7 +695,7 @@ func TestOpenGemRejectsOversizedData(t *testing.T) {
 	_, _ = outerTw.Write(dataTarGz)
 	_ = outerTw.Close()
 
-	_, err := openGem(bytes.NewReader(gemBuf.Bytes()))
+	_, err := openGem(gemBuf.Bytes())
 	if err == nil {
 		t.Fatal("expected error for oversized gem data")
 	}

@@ -25,13 +25,13 @@ const (
 
 // FileDiff represents the diff for a single file.
 type FileDiff struct {
-	Path      string `json:"path"`
-	Type      string `json:"type"` // "modified", "added", "deleted", "renamed"
-	OldPath   string `json:"old_path,omitempty"`
-	Diff      string `json:"diff,omitempty"`
-	IsBinary  bool   `json:"is_binary,omitempty"`
-	LinesAdded int   `json:"lines_added"`
-	LinesDeleted int `json:"lines_deleted"`
+	Path         string `json:"path"`
+	Type         string `json:"type"` // "modified", "added", "deleted", "renamed"
+	OldPath      string `json:"old_path,omitempty"`
+	Diff         string `json:"diff,omitempty"`
+	IsBinary     bool   `json:"is_binary,omitempty"`
+	LinesAdded   int    `json:"lines_added"`
+	LinesDeleted int    `json:"lines_deleted"`
 }
 
 // CompareResult contains the complete comparison between two versions.
@@ -231,9 +231,9 @@ func generateSimpleDiff(path string, oldContent, newContent []byte) (string, int
 	oldEnd := len(oldLines) - 1
 	newEnd := len(newLines) - 1
 	for commonSuffix < maxCommon-commonPrefix &&
-	      oldEnd-commonSuffix >= commonPrefix &&
-	      newEnd-commonSuffix >= commonPrefix &&
-	      oldLines[oldEnd-commonSuffix] == newLines[newEnd-commonSuffix] {
+		oldEnd-commonSuffix >= commonPrefix &&
+		newEnd-commonSuffix >= commonPrefix &&
+		oldLines[oldEnd-commonSuffix] == newLines[newEnd-commonSuffix] {
 		commonSuffix++
 	}
 

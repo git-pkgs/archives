@@ -37,6 +37,10 @@ func (p *prefixStripper) Extract(filePath string) (io.ReadCloser, error) {
 	return p.reader.Extract(prefixedPath)
 }
 
+func (p *prefixStripper) Hash(algo string) (string, error) {
+	return p.reader.Hash(algo)
+}
+
 func (p *prefixStripper) Close() error {
 	return p.reader.Close()
 }

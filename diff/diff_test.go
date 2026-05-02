@@ -33,15 +33,15 @@ func createTestArchiveWithFiles(files map[string]string) []byte {
 func TestCompare(t *testing.T) {
 	// Create two test archives
 	oldFiles := map[string]string{
-		"README.md":    "# Old Version\n",
-		"src/main.go":  "package main\n\nfunc main() {\n\tprintln(\"old\")\n}\n",
-		"deleted.txt":  "this will be deleted",
+		"README.md":   "# Old Version\n",
+		"src/main.go": "package main\n\nfunc main() {\n\tprintln(\"old\")\n}\n",
+		"deleted.txt": "this will be deleted",
 	}
 
 	newFiles := map[string]string{
-		"README.md":    "# New Version\n\nWith more content\n",
-		"src/main.go":  "package main\n\nfunc main() {\n\tprintln(\"new\")\n}\n",
-		"added.txt":    "this is new",
+		"README.md":   "# New Version\n\nWith more content\n",
+		"src/main.go": "package main\n\nfunc main() {\n\tprintln(\"new\")\n}\n",
+		"added.txt":   "this is new",
 	}
 
 	oldArchive, err := archives.Open("old.tar.gz", bytes.NewReader(createTestArchiveWithFiles(oldFiles)))

@@ -2,6 +2,7 @@ package archives
 
 import (
 	"archive/tar"
+	"bytes"
 	"fmt"
 	"io"
 )
@@ -10,12 +11,12 @@ import (
 // - gem file is a tar archive containing metadata.gz and data.tar.gz
 // - data.tar.gz contains the actual source code
 type gemReader struct {
-	dataReader Reader // The inner data.tar.gz reader
+	raw        []byte
+	dataReader Reader
 }
 
-func openGem(content io.Reader) (*gemReader, error) {
-	// Read the gem file as a tar archive
-	tr := tar.NewReader(content)
+func openGem(raw []byte) (*gemReader, error) {
+	tr := tar.NewReader(bytes.NewReader(raw))
 
 	// Find data.tar.gz in the gem
 	for {
@@ -37,13 +38,12 @@ func openGem(content io.Reader) (*gemReader, error) {
 				return nil, fmt.Errorf("%w: data.tar.gz exceeds %d bytes", ErrDecompressLimit, maxDecompressedSize)
 			}
 
-			// Open the inner tar.gz
-			dataReader, err := openTar(io.NopCloser(newBytesReader(dataContent)), "gzip")
+			dataReader, err := openTar(dataContent, "gzip")
 			if err != nil {
 				return nil, fmt.Errorf("opening data.tar.gz: %w", err)
 			}
 
-			return &gemReader{dataReader: dataReader}, nil
+			return &gemReader{raw: raw, dataReader: dataReader}, nil
 		}
 	}
 }
@@ -60,32 +60,14 @@ func (g *gemReader) Extract(filePath string) (io.ReadCloser, error) {
 	return g.dataReader.Extract(filePath)
 }
 
+func (g *gemReader) Hash(algo string) (string, error) {
+	return hashRaw(g.raw, algo)
+}
+
 func (g *gemReader) Close() error {
+	g.raw = nil
 	if g.dataReader != nil {
 		return g.dataReader.Close()
 	}
-	return nil
-}
-
-// bytesReader implements io.Reader from a byte slice
-type bytesReader struct {
-	data []byte
-	pos  int
-}
-
-func newBytesReader(data []byte) *bytesReader {
-	return &bytesReader{data: data}
-}
-
-func (b *bytesReader) Read(p []byte) (n int, err error) {
-	if b.pos >= len(b.data) {
-		return 0, io.EOF
-	}
-	n = copy(p, b.data[b.pos:])
-	b.pos += n
-	return n, nil
-}
-
-func (b *bytesReader) Close() error {
 	return nil
 }

@@ -46,6 +46,26 @@ func main() {
 }
 ```
 
+### Hashing
+
+`Open` buffers the raw archive bytes in memory, so the reader can compute checksums of the original artifact without re-reading from the source. This is useful for verifying a downloaded package against the digest published by its registry.
+
+```go
+reader, _ := archives.Open("rails-7.1.0.gem", f)
+defer reader.Close()
+
+sha, _ := reader.Hash(archives.SHA256)
+fmt.Println(sha) // hex-encoded sha256 of the .gem file
+
+// also available: archives.SHA512, archives.SHA1, archives.MD5
+```
+
+The hash is computed over the archive as it was passed to `Open`, not the decompressed contents. For nested formats like gems this means the outer `.gem` file, which is what rubygems.org publishes. If you already have the bytes in hand, `OpenBytes` skips the extra read:
+
+```go
+reader, _ := archives.OpenBytes("pkg.tgz", data)
+```
+
 ### Prefix stripping
 
 Some package formats wrap content in a directory (npm uses `package/`). `OpenWithPrefix` strips a path prefix from all entries:

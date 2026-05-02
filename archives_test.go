@@ -5,6 +5,8 @@ import (
 	"archive/zip"
 	"bytes"
 	"compress/gzip"
+	"errors"
+	"fmt"
 	"io"
 	"os"
 	"strings"
@@ -567,5 +569,134 @@ func TestGetStripPrefixNpm(t *testing.T) {
 		if strings.Contains(f.Path, "/") {
 			t.Errorf("file %q should be at root level after prefix stripping", f.Path)
 		}
+	}
+}
+
+func TestOpenTarRejectsDecompressBomb(t *testing.T) {
+	oldMax := maxDecompressedSize
+	maxDecompressedSize = 1024
+	defer func() { maxDecompressedSize = oldMax }()
+
+	buf := new(bytes.Buffer)
+	gw := gzip.NewWriter(buf)
+	tw := tar.NewWriter(gw)
+
+	content := strings.Repeat("x", 2048)
+	_ = tw.WriteHeader(&tar.Header{
+		Name: "big.txt",
+		Size: int64(len(content)),
+		Mode: 0644,
+	})
+	_, _ = tw.Write([]byte(content))
+	_ = tw.Close()
+	_ = gw.Close()
+
+	_, err := openTar(bytes.NewReader(buf.Bytes()), "gzip")
+	if err == nil {
+		t.Fatal("expected error for oversized decompressed content")
+	}
+	if !errors.Is(err, ErrDecompressLimit) {
+		t.Fatalf("expected ErrDecompressLimit, got: %v", err)
+	}
+}
+
+func TestOpenTarAcceptsWithinLimit(t *testing.T) {
+	oldMax := maxDecompressedSize
+	maxDecompressedSize = 4096
+	defer func() { maxDecompressedSize = oldMax }()
+
+	buf := new(bytes.Buffer)
+	gw := gzip.NewWriter(buf)
+	tw := tar.NewWriter(gw)
+
+	content := strings.Repeat("x", 1024)
+	_ = tw.WriteHeader(&tar.Header{
+		Name: "ok.txt",
+		Size: int64(len(content)),
+		Mode: 0644,
+	})
+	_, _ = tw.Write([]byte(content))
+	_ = tw.Close()
+	_ = gw.Close()
+
+	reader, err := openTar(bytes.NewReader(buf.Bytes()), "gzip")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	files, _ := reader.List()
+	if len(files) != 1 {
+		t.Fatalf("expected 1 file, got %d", len(files))
+	}
+	if files[0].Path != "ok.txt" {
+		t.Errorf("expected ok.txt, got %s", files[0].Path)
+	}
+}
+
+func TestOpenTarRejectsCumulativeOverflow(t *testing.T) {
+	oldMax := maxDecompressedSize
+	maxDecompressedSize = 1024
+	defer func() { maxDecompressedSize = oldMax }()
+
+	buf := new(bytes.Buffer)
+	gw := gzip.NewWriter(buf)
+	tw := tar.NewWriter(gw)
+
+	for i := 0; i < 3; i++ {
+		content := strings.Repeat("y", 512)
+		_ = tw.WriteHeader(&tar.Header{
+			Name: fmt.Sprintf("file%d.txt", i),
+			Size: int64(len(content)),
+			Mode: 0644,
+		})
+		_, _ = tw.Write([]byte(content))
+	}
+	_ = tw.Close()
+	_ = gw.Close()
+
+	_, err := openTar(bytes.NewReader(buf.Bytes()), "gzip")
+	if err == nil {
+		t.Fatal("expected error when cumulative size exceeds limit")
+	}
+	if !errors.Is(err, ErrDecompressLimit) {
+		t.Fatalf("expected ErrDecompressLimit, got: %v", err)
+	}
+}
+
+func TestOpenGemRejectsOversizedData(t *testing.T) {
+	oldMax := maxDecompressedSize
+	maxDecompressedSize = 512
+	defer func() { maxDecompressedSize = oldMax }()
+
+	// Build a data.tar.gz that decompresses larger than the limit
+	var innerBuf bytes.Buffer
+	innerGw := gzip.NewWriter(&innerBuf)
+	innerTw := tar.NewWriter(innerGw)
+
+	content := strings.Repeat("z", 1024)
+	_ = innerTw.WriteHeader(&tar.Header{
+		Name: "lib/main.rb",
+		Size: int64(len(content)),
+		Mode: 0644,
+	})
+	_, _ = innerTw.Write([]byte(content))
+	_ = innerTw.Close()
+	_ = innerGw.Close()
+
+	// Wrap in outer gem tar
+	var gemBuf bytes.Buffer
+	outerTw := tar.NewWriter(&gemBuf)
+	dataTarGz := innerBuf.Bytes()
+	_ = outerTw.WriteHeader(&tar.Header{
+		Name: "data.tar.gz",
+		Size: int64(len(dataTarGz)),
+		Mode: 0644,
+	})
+	_, _ = outerTw.Write(dataTarGz)
+	_ = outerTw.Close()
+
+	_, err := openGem(bytes.NewReader(gemBuf.Bytes()))
+	if err == nil {
+		t.Fatal("expected error for oversized gem data")
 	}
 }

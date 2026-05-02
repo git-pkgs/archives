@@ -29,10 +29,12 @@ func openGem(content io.Reader) (*gemReader, error) {
 
 		// Look for data.tar.gz
 		if header.Name == "data.tar.gz" {
-			// Read the data.tar.gz content
-			dataContent, err := io.ReadAll(tr)
+			dataContent, err := io.ReadAll(io.LimitReader(tr, maxDecompressedSize+1))
 			if err != nil {
 				return nil, fmt.Errorf("reading data.tar.gz: %w", err)
+			}
+			if int64(len(dataContent)) > maxDecompressedSize {
+				return nil, fmt.Errorf("%w: data.tar.gz exceeds %d bytes", ErrDecompressLimit, maxDecompressedSize)
 			}
 
 			// Open the inner tar.gz

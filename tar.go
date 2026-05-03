@@ -18,6 +18,7 @@ var maxDecompressedSize int64 = 512 << 20 // 512 MiB
 var ErrDecompressLimit = errors.New("decompressed content exceeds size limit")
 
 type tarReader struct {
+	raw   []byte
 	files []tarFileEntry
 }
 
@@ -26,8 +27,8 @@ type tarFileEntry struct {
 	data []byte
 }
 
-func openTar(content io.Reader, compression string) (*tarReader, error) {
-	// Wrap with decompressor if needed
+func openTar(raw []byte, compression string) (*tarReader, error) {
+	content := bytes.NewReader(raw)
 	r := io.Reader(content)
 
 	switch compression {
@@ -89,7 +90,7 @@ func openTar(content io.Reader, compression string) (*tarReader, error) {
 		})
 	}
 
-	return &tarReader{files: files}, nil
+	return &tarReader{raw: raw, files: files}, nil
 }
 
 func (t *tarReader) List() ([]FileInfo, error) {
@@ -150,7 +151,12 @@ func (t *tarReader) Extract(filePath string) (io.ReadCloser, error) {
 	return nil, fmt.Errorf("file not found: %s", filePath)
 }
 
+func (t *tarReader) Hash(algo string) (string, error) {
+	return hashRaw(t.raw, algo)
+}
+
 func (t *tarReader) Close() error {
+	t.raw = nil
 	t.files = nil
 	return nil
 }

@@ -19,13 +19,13 @@ import (
 
 // FileInfo represents metadata about a file in an archive.
 type FileInfo struct {
-	Path         string    // Full path within archive
-	Name         string    // Base name
-	Size         int64     // Uncompressed size in bytes
-	ModTime      time.Time // Modification time
-	IsDir        bool      // Whether this is a directory
-	Mode         uint32    // File mode/permissions
-	CompressedSize int64   // Compressed size (if available)
+	Path           string    // Full path within archive
+	Name           string    // Base name
+	Size           int64     // Uncompressed size in bytes
+	ModTime        time.Time // Modification time
+	IsDir          bool      // Whether this is a directory
+	Mode           uint32    // File mode/permissions
+	CompressedSize int64     // Compressed size (if available)
 }
 
 // Reader provides methods to browse and extract files from archives.
@@ -41,6 +41,12 @@ type Reader interface {
 	// Returns io.ReadCloser for the file content.
 	Extract(filePath string) (io.ReadCloser, error)
 
+	// Hash returns the hex-encoded digest of the raw archive bytes using
+	// the named algorithm. Supported algorithms are SHA256, SHA512, SHA1
+	// and MD5. The hash is computed over the original archive as passed
+	// to Open, not the decompressed contents.
+	Hash(algo string) (string, error)
+
 	// Close releases resources associated with the reader.
 	Close() error
 }
@@ -48,6 +54,7 @@ type Reader interface {
 // Open creates an archive reader for the given content.
 // The filename is used to detect the archive format.
 // The content reader will be read entirely into memory.
+//
 //nolint:ireturn // factory function returning interface by design
 func Open(filename string, content io.Reader) (Reader, error) {
 	format := detectFormat(filename)
@@ -55,46 +62,79 @@ func Open(filename string, content io.Reader) (Reader, error) {
 		return nil, fmt.Errorf("unsupported archive format: %s", filename)
 	}
 
-	var reader Reader
-	var err error
+	raw, err := io.ReadAll(content)
+	if err != nil {
+		return nil, fmt.Errorf("reading archive content: %w", err)
+	}
 
+	return openRaw(format, raw)
+}
+
+// OpenBytes is like Open but accepts the archive content as a byte slice.
+// The slice is retained (not copied) for the lifetime of the Reader and
+// must not be modified by the caller after this call.
+//
+//nolint:ireturn // factory function returning interface by design
+func OpenBytes(filename string, content []byte) (Reader, error) {
+	format := detectFormat(filename)
+	if format == "" {
+		return nil, fmt.Errorf("unsupported archive format: %s", filename)
+	}
+
+	return openRaw(format, content)
+}
+
+//nolint:ireturn
+func openRaw(format string, raw []byte) (Reader, error) {
 	switch format {
 	case "zip":
-		reader, err = openZip(content)
+		return openZip(raw)
 	case "tar":
-		reader, err = openTar(content, "")
+		return openTar(raw, "")
 	case "tar.gz", "tgz":
-		reader, err = openTar(content, "gzip")
+		return openTar(raw, "gzip")
 	case "tar.bz2":
-		reader, err = openTar(content, "bzip2")
+		return openTar(raw, "bzip2")
 	case "tar.xz":
-		reader, err = openTar(content, "xz")
+		return openTar(raw, "xz")
 	case "gem":
-		reader, err = openGem(content)
+		return openGem(raw)
 	default:
 		return nil, fmt.Errorf("unsupported format: %s", format)
 	}
-
-	return reader, err
 }
 
 // OpenWithPrefix opens an archive and strips the given prefix from all paths.
 // This is useful for npm packages which wrap content in a "package/" directory.
+//
 //nolint:ireturn // factory function returning interface by design
 func OpenWithPrefix(filename string, content io.Reader, stripPrefix string) (Reader, error) {
 	reader, err := Open(filename, content)
 	if err != nil {
 		return nil, err
 	}
+	return wrapPrefix(reader, stripPrefix), nil
+}
 
-	if stripPrefix == "" {
-		return reader, nil
+// OpenBytesWithPrefix is like OpenWithPrefix but accepts the archive content as
+// a byte slice. The slice is retained (not copied) for the lifetime of the
+// Reader and must not be modified by the caller after this call.
+//
+//nolint:ireturn // factory function returning interface by design
+func OpenBytesWithPrefix(filename string, content []byte, stripPrefix string) (Reader, error) {
+	reader, err := OpenBytes(filename, content)
+	if err != nil {
+		return nil, err
 	}
+	return wrapPrefix(reader, stripPrefix), nil
+}
 
-	return &prefixStripper{
-		reader: reader,
-		prefix: stripPrefix,
-	}, nil
+//nolint:ireturn
+func wrapPrefix(reader Reader, stripPrefix string) Reader {
+	if stripPrefix == "" {
+		return reader
+	}
+	return &prefixStripper{reader: reader, prefix: stripPrefix}
 }
 
 // detectFormat determines archive format from filename extension.

@@ -9,25 +9,18 @@ import (
 )
 
 type zipReader struct {
-	data   []byte
+	raw    []byte
 	reader *zip.Reader
 }
 
-func openZip(content io.Reader) (*zipReader, error) {
-	// Read entire content into memory
-	data, err := io.ReadAll(content)
-	if err != nil {
-		return nil, fmt.Errorf("reading zip content: %w", err)
-	}
-
-	// Create zip reader from bytes
-	reader, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
+func openZip(raw []byte) (*zipReader, error) {
+	reader, err := zip.NewReader(bytes.NewReader(raw), int64(len(raw)))
 	if err != nil {
 		return nil, fmt.Errorf("opening zip: %w", err)
 	}
 
 	return &zipReader{
-		data:   data,
+		raw:    raw,
 		reader: reader,
 	}, nil
 }
@@ -97,9 +90,12 @@ func (z *zipReader) Extract(filePath string) (io.ReadCloser, error) {
 	return nil, fmt.Errorf("file not found: %s", filePath)
 }
 
+func (z *zipReader) Hash(algo string) (string, error) {
+	return hashRaw(z.raw, algo)
+}
+
 func (z *zipReader) Close() error {
-	// No resources to clean up for zip reader
-	z.data = nil
+	z.raw = nil
 	z.reader = nil
 	return nil
 }

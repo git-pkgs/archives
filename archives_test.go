@@ -5,6 +5,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"compress/gzip"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
@@ -12,6 +13,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/ulikunitz/xz"
 )
 
 func TestDetectFormat(t *testing.T) {
@@ -183,11 +186,9 @@ func TestZipReader(t *testing.T) {
 	}
 }
 
-// createTestTarGz creates a tar.gz archive in memory with test files
-func createTestTarGz() []byte {
+func createTestTar() []byte {
 	buf := new(bytes.Buffer)
-	gw := gzip.NewWriter(buf)
-	tw := tar.NewWriter(gw)
+	tw := tar.NewWriter(buf)
 
 	files := []struct {
 		name    string
@@ -210,7 +211,42 @@ func createTestTarGz() []byte {
 	}
 
 	_ = tw.Close()
+	return buf.Bytes()
+}
+
+// createTestTarGz creates a tar.gz archive in memory with test files
+func createTestTarGz() []byte {
+	buf := new(bytes.Buffer)
+	gw := gzip.NewWriter(buf)
+	_, _ = gw.Write(createTestTar())
 	_ = gw.Close()
+	return buf.Bytes()
+}
+
+func createTestTarBz2(t *testing.T) []byte {
+	t.Helper()
+	// The standard library provides a bzip2 reader but no writer.
+	const encoded = "QlpoOTFBWSZTWQMNh5UAADx7kMkAAIBAAX+AAgBjZB7ABAAAGCAAdQ1T0yQDTTQPUaPKCSUaADQ9QaAbEq4fI1pAWUIsSjpZUgZDKvGcQPCLIeDs6QRMYnLQ4FEXbEKTCiYZ2FQgq1juQ+zDKpuKJfi7kinChIAYbDyo"
+	data, err := base64.StdEncoding.DecodeString(encoded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return data
+}
+
+func createTestTarXz(t *testing.T) []byte {
+	t.Helper()
+	buf := new(bytes.Buffer)
+	w, err := xz.NewWriter(buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.Write(createTestTar()); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
 	return buf.Bytes()
 }
 
@@ -274,6 +310,86 @@ func TestOpen(t *testing.T) {
 	_, err = Open("test.unknown", bytes.NewReader([]byte("data")))
 	if err == nil {
 		t.Error("Open with unsupported format should fail")
+	}
+}
+
+func TestOpenDetectsExtensionlessArchives(t *testing.T) {
+	tests := []struct {
+		name string
+		data []byte
+	}{
+		{"ZIP", createTestZip()},
+		{"TAR", createTestTar()},
+		{"gzip", createTestTarGz()},
+		{"bzip2", createTestTarBz2(t)},
+		{"xz", createTestTarXz(t)},
+	}
+	for _, test := range tests {
+		t.Run(test.name+"/Open", func(t *testing.T) {
+			reader, err := Open("artifact", bytes.NewReader(test.data))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = reader.Close() }()
+			files, err := reader.List()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(files) == 0 {
+				t.Fatal("archive contains no files")
+			}
+		})
+
+		t.Run(test.name+"/OpenBytes", func(t *testing.T) {
+			reader, err := OpenBytes("artifact", test.data)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = reader.Close() }()
+			files, err := reader.List()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(files) == 0 {
+				t.Fatal("archive contains no files")
+			}
+		})
+	}
+}
+
+func TestOpenKeepsKnownFilenameFormat(t *testing.T) {
+	_, err := OpenBytes("misleading.tar", createTestZip())
+	if err == nil {
+		t.Fatal("ZIP content with a TAR filename was opened as ZIP")
+	}
+	if !strings.Contains(err.Error(), "reading tar") {
+		t.Fatalf("error = %q, want TAR parser error", err)
+	}
+}
+
+func TestOpenDoesNotInferGem(t *testing.T) {
+	reader, err := OpenBytes("artifact", createTestGem())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = reader.Close() }()
+	if _, ok := reader.(*tarReader); !ok {
+		t.Fatalf("reader = %T, want generic TAR reader", reader)
+	}
+}
+
+func TestOpenCompressedNonTar(t *testing.T) {
+	buf := new(bytes.Buffer)
+	w := gzip.NewWriter(buf)
+	_, _ = w.Write([]byte("not a tar archive"))
+	_ = w.Close()
+
+	_, err := OpenBytes("artifact", buf.Bytes())
+	if err == nil {
+		t.Fatal("compressed non-TAR content was accepted")
+	}
+	if !strings.Contains(err.Error(), "reading tar") {
+		t.Fatalf("error = %q, want TAR parser error", err)
 	}
 }
 

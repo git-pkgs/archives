@@ -66,6 +66,11 @@ The hash is computed over the archive as it was passed to `Open`, not the decomp
 reader, _ := archives.OpenBytes("pkg.tgz", data)
 ```
 
+Filename mappings are used first. When a name has no supported extension,
+`Open` and `OpenBytes` detect ZIP, TAR, gzip, bzip2, and xz from the content.
+Compressed content is opened as TAR and returns a parser error when it does not
+contain a TAR archive.
+
 ### Prefix stripping
 
 Some package formats wrap content in a directory (npm uses `package/`). `OpenWithPrefix` strips a path prefix from all entries:

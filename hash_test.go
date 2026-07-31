@@ -184,7 +184,7 @@ func TestOpenBytes(t *testing.T) {
 
 func TestOpenBytesDoesNotCopy(t *testing.T) {
 	data := createTestZip()
-	reader, err := OpenBytes("test.zip", data)
+	reader, err := OpenBytes("artifact", data)
 	if err != nil {
 		t.Fatalf("OpenBytes failed: %v", err)
 	}

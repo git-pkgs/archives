@@ -15,6 +15,18 @@ import (
 	"path"
 	"strings"
 	"time"
+
+	"github.com/git-pkgs/magic"
+)
+
+const (
+	formatZIP      = "zip"
+	formatTAR      = "tar"
+	formatTarGzip  = "tar.gz"
+	formatTGZ      = "tgz"
+	formatTarBzip2 = "tar.bz2"
+	formatTarXZ    = "tar.xz"
+	formatGem      = "gem"
 )
 
 // FileInfo represents metadata about a file in an archive.
@@ -52,19 +64,22 @@ type Reader interface {
 }
 
 // Open creates an archive reader for the given content.
-// The filename is used to detect the archive format.
+// The filename is used first to detect the archive format. If it has no
+// supported extension, the content is checked for a supported physical format.
 // The content reader will be read entirely into memory.
 //
 //nolint:ireturn // factory function returning interface by design
 func Open(filename string, content io.Reader) (Reader, error) {
 	format := detectFormat(filename)
-	if format == "" {
-		return nil, fmt.Errorf("unsupported archive format: %s", filename)
-	}
-
 	raw, err := io.ReadAll(content)
 	if err != nil {
 		return nil, fmt.Errorf("reading archive content: %w", err)
+	}
+	if format == "" {
+		format = detectContentFormat(raw)
+	}
+	if format == "" {
+		return nil, fmt.Errorf("unsupported archive format: %s", filename)
 	}
 
 	return openRaw(format, raw)
@@ -78,6 +93,9 @@ func Open(filename string, content io.Reader) (Reader, error) {
 func OpenBytes(filename string, content []byte) (Reader, error) {
 	format := detectFormat(filename)
 	if format == "" {
+		format = detectContentFormat(content)
+	}
+	if format == "" {
 		return nil, fmt.Errorf("unsupported archive format: %s", filename)
 	}
 
@@ -87,20 +105,37 @@ func OpenBytes(filename string, content []byte) (Reader, error) {
 //nolint:ireturn
 func openRaw(format string, raw []byte) (Reader, error) {
 	switch format {
-	case "zip":
+	case formatZIP:
 		return openZip(raw)
-	case "tar":
+	case formatTAR:
 		return openTar(raw, "")
-	case "tar.gz", "tgz":
+	case formatTarGzip, formatTGZ:
 		return openTar(raw, "gzip")
-	case "tar.bz2":
+	case formatTarBzip2:
 		return openTar(raw, "bzip2")
-	case "tar.xz":
+	case formatTarXZ:
 		return openTar(raw, "xz")
-	case "gem":
+	case formatGem:
 		return openGem(raw)
 	default:
 		return nil, fmt.Errorf("unsupported format: %s", format)
+	}
+}
+
+func detectContentFormat(content []byte) string {
+	switch magic.Detect(content).Format {
+	case "zip":
+		return formatZIP
+	case "tar":
+		return formatTAR
+	case "gzip":
+		return formatTarGzip
+	case "bzip2":
+		return formatTarBzip2
+	case "xz":
+		return formatTarXZ
+	default:
+		return ""
 	}
 }
 
@@ -143,26 +178,26 @@ func detectFormat(filename string) string {
 
 	// Check for compound extensions first
 	if strings.HasSuffix(filename, ".tar.gz") {
-		return "tar.gz"
+		return formatTarGzip
 	}
 	if strings.HasSuffix(filename, ".tar.bz2") {
-		return "tar.bz2"
+		return formatTarBzip2
 	}
 	if strings.HasSuffix(filename, ".tar.xz") {
-		return "tar.xz"
+		return formatTarXZ
 	}
 
 	// Check simple extensions
 	ext := path.Ext(filename)
 	switch ext {
 	case ".zip", ".jar", ".whl", ".nupkg", ".egg":
-		return "zip"
+		return formatZIP
 	case ".tar":
-		return "tar"
+		return formatTAR
 	case ".tgz":
-		return "tgz"
+		return formatTGZ
 	case ".gem":
-		return "gem"
+		return formatGem
 	default:
 		return ""
 	}

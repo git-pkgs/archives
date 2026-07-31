@@ -357,6 +357,18 @@ func TestOpenDetectsExtensionlessArchives(t *testing.T) {
 	}
 }
 
+func TestOpenLimitsUnsupportedContentRead(t *testing.T) {
+	content := bytes.NewReader(bytes.Repeat([]byte("x"), contentSniffSize*4))
+	_, err := Open("artifact", content)
+	if err == nil {
+		t.Fatal("unsupported content was accepted")
+	}
+	consumed := content.Size() - int64(content.Len())
+	if consumed > contentSniffSize {
+		t.Fatalf("read %d bytes, want at most %d", consumed, contentSniffSize)
+	}
+}
+
 func TestOpenKeepsKnownFilenameFormat(t *testing.T) {
 	_, err := OpenBytes("misleading.tar", createTestZip())
 	if err == nil {

@@ -10,6 +10,7 @@
 package archives
 
 import (
+	"bufio"
 	"fmt"
 	"io"
 	"path"
@@ -20,13 +21,14 @@ import (
 )
 
 const (
-	formatZIP      = "zip"
-	formatTAR      = "tar"
-	formatTarGzip  = "tar.gz"
-	formatTGZ      = "tgz"
-	formatTarBzip2 = "tar.bz2"
-	formatTarXZ    = "tar.xz"
-	formatGem      = "gem"
+	formatZIP        = "zip"
+	formatTAR        = "tar"
+	formatTarGzip    = "tar.gz"
+	formatTGZ        = "tgz"
+	formatTarBzip2   = "tar.bz2"
+	formatTarXZ      = "tar.xz"
+	formatGem        = "gem"
+	contentSniffSize = 512
 )
 
 // FileInfo represents metadata about a file in an archive.
@@ -66,20 +68,28 @@ type Reader interface {
 // Open creates an archive reader for the given content.
 // The filename is used first to detect the archive format. If it has no
 // supported extension, the content is checked for a supported physical format.
-// The content reader will be read entirely into memory.
+// Recognised archives are read entirely into memory. An unrecognised stream
+// with no supported extension is rejected after reading at most 512 bytes.
 //
 //nolint:ireturn // factory function returning interface by design
 func Open(filename string, content io.Reader) (Reader, error) {
 	format := detectFormat(filename)
+	if format == "" {
+		buffered := bufio.NewReaderSize(content, contentSniffSize)
+		prefix, err := buffered.Peek(contentSniffSize)
+		if err != nil && err != io.EOF {
+			return nil, fmt.Errorf("reading archive content: %w", err)
+		}
+		format = detectContentPrefixFormat(prefix)
+		if format == "" {
+			return nil, fmt.Errorf("unsupported archive format: %s", filename)
+		}
+		content = buffered
+	}
+
 	raw, err := io.ReadAll(content)
 	if err != nil {
 		return nil, fmt.Errorf("reading archive content: %w", err)
-	}
-	if format == "" {
-		format = detectContentFormat(raw)
-	}
-	if format == "" {
-		return nil, fmt.Errorf("unsupported archive format: %s", filename)
 	}
 
 	return openRaw(format, raw)
@@ -123,7 +133,15 @@ func openRaw(format string, raw []byte) (Reader, error) {
 }
 
 func detectContentFormat(content []byte) string {
-	switch magic.Detect(content).Format {
+	return archiveFormat(magic.Detect(content).Format)
+}
+
+func detectContentPrefixFormat(content []byte) string {
+	return archiveFormat(magic.DetectPrefix(content).Format)
+}
+
+func archiveFormat(detected string) string {
+	switch detected {
 	case "zip":
 		return formatZIP
 	case "tar":

@@ -10,13 +10,10 @@ import (
 	"strings"
 
 	"github.com/git-pkgs/archives"
+	"github.com/git-pkgs/magic"
 )
 
 const (
-	// binaryCheckSize is the number of bytes to check for null bytes when
-	// determining if content is binary.
-	binaryCheckSize = 8192
-
 	// Diff type constants for FileDiff.Type.
 	TypeModified = "modified"
 	TypeAdded    = "added"
@@ -133,7 +130,7 @@ func compareFile(path string, oldInfo, newInfo archives.FileInfo, oldReader, new
 	case !inOld && inNew:
 		fd := FileDiff{Path: path, Type: TypeAdded}
 		if content, err := readFileContent(newReader, path); err == nil {
-			if isBinary(content) {
+			if !isDiffableText(content) {
 				fd.IsBinary = true
 			} else {
 				fd.Diff = generateAddedDiff(path, content)
@@ -153,7 +150,7 @@ func compareFile(path string, oldInfo, newInfo archives.FileInfo, oldReader, new
 		}
 
 		fd := FileDiff{Path: path, Type: TypeModified}
-		if isBinary(oldContent) || isBinary(newContent) {
+		if !isDiffableText(oldContent) || !isDiffableText(newContent) {
 			fd.IsBinary = true
 		} else {
 			diffText, added, deleted := generateUnifiedDiff(path, oldContent, newContent)
@@ -176,25 +173,10 @@ func readFileContent(reader archives.Reader, path string) ([]byte, error) {
 	return io.ReadAll(rc)
 }
 
-// isBinary checks if content appears to be binary.
-func isBinary(content []byte) bool {
-	if len(content) == 0 {
-		return false
-	}
-
-	// Check first 8KB for null bytes
-	checkLen := len(content)
-	if checkLen > binaryCheckSize {
-		checkLen = binaryCheckSize
-	}
-
-	for i := 0; i < checkLen; i++ {
-		if content[i] == 0 {
-			return true
-		}
-	}
-
-	return false
+func isDiffableText(content []byte) bool {
+	detection := magic.Detect(content)
+	return detection.Kind == magic.KindText &&
+		(detection.Encoding == "" || detection.Encoding == "utf-8")
 }
 
 // generateUnifiedDiff generates a unified diff between two file contents.

@@ -10,6 +10,8 @@ import (
 	"github.com/git-pkgs/archives"
 )
 
+const previousBinaryCheckSize = 8 << 10
+
 func createTestArchiveWithFiles(files map[string]string) []byte {
 	buf := new(bytes.Buffer)
 	gw := gzip.NewWriter(buf)
@@ -101,24 +103,35 @@ func TestCompare(t *testing.T) {
 	}
 }
 
-func TestIsBinary(t *testing.T) {
+func TestIsDiffableText(t *testing.T) {
+	lateNUL := []byte(strings.Repeat("x", previousBinaryCheckSize))
+	lateNUL = append(lateNUL, 0)
+
 	tests := []struct {
 		name     string
 		content  []byte
-		expected bool
+		diffable bool
 	}{
-		{"empty", []byte{}, false},
-		{"text", []byte("hello world"), false},
-		{"binary with null", []byte{0x00, 0x01, 0x02}, true},
-		{"text with newlines", []byte("line1\nline2\nline3"), false},
-		{"json", []byte(`{"key": "value"}`), false},
+		{"empty", nil, true},
+		{"text", []byte("hello world"), true},
+		{"Unicode text", []byte("café ☕"), true},
+		{"UTF-8 BOM", []byte("\xef\xbb\xbfhello"), true},
+		{"text with newlines", []byte("line1\nline2\nline3"), true},
+		{"JSON", []byte(`{"key": "value"}`), true},
+		{"PDF without NUL", []byte("%PDF-1.7\n"), false},
+		{"disallowed control", []byte("hello\x01world"), false},
+		{"invalid UTF-8", []byte{'c', 'a', 'f', 0xe9}, false},
+		{"early NUL", []byte("hello\x00world"), false},
+		{"late NUL", lateNUL, false},
+		{"UTF-16LE", []byte{0xff, 0xfe, 'h', 0, 'i', 0}, false},
+		{"UTF-16BE", []byte{0xfe, 0xff, 0, 'h', 0, 'i'}, false},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := isBinary(tt.content)
-			if got != tt.expected {
-				t.Errorf("isBinary() = %v, want %v", got, tt.expected)
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got := isDiffableText(test.content)
+			if got != test.diffable {
+				t.Errorf("isDiffableText() = %v, want %v", got, test.diffable)
 			}
 		})
 	}
@@ -222,11 +235,11 @@ func TestCompareIdentical(t *testing.T) {
 
 func TestCompareBinaryFiles(t *testing.T) {
 	oldFiles := map[string]string{
-		"image.png": string([]byte{0x89, 0x50, 0x4E, 0x47, 0x00}), // Binary content
+		"document.pdf": "%PDF-1.7\nold content",
 	}
 
 	newFiles := map[string]string{
-		"image.png": string([]byte{0x89, 0x50, 0x4E, 0x47, 0x01}), // Different binary
+		"document.pdf": "%PDF-1.7\nnew content",
 	}
 
 	oldArchive, _ := archives.Open("old.tar.gz", bytes.NewReader(createTestArchiveWithFiles(oldFiles)))

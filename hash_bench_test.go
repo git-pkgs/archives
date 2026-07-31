@@ -76,3 +76,27 @@ func BenchmarkOpenBytesTarGz(b *testing.B) {
 		_ = r.Close()
 	}
 }
+
+func BenchmarkOpenBytesDetectedTarGz(b *testing.B) {
+	b.SetBytes(int64(len(benchArchive)))
+	b.ReportAllocs()
+	for b.Loop() {
+		r, err := OpenBytes("artifact", benchArchive)
+		if err != nil {
+			b.Fatal(err)
+		}
+		_ = r.Close()
+	}
+}
+
+func BenchmarkOpenDetectedTarGz(b *testing.B) {
+	b.SetBytes(int64(len(benchArchive)))
+	b.ReportAllocs()
+	for b.Loop() {
+		r, err := Open("artifact", bytes.NewReader(benchArchive))
+		if err != nil {
+			b.Fatal(err)
+		}
+		_ = r.Close()
+	}
+}

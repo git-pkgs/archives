@@ -32,6 +32,9 @@ func TestDetectFormat(t *testing.T) {
 		{"package.tar.bz2", "tar.bz2"},
 		{"package.tar.xz", "tar.xz"},
 		{"package.gem", "gem"},
+		{"package.vsix", "zip"},
+		{"package.crate", "tgz"},
+		{"package.apk", ""}, // Ambiguous: routed by content sniff
 		{"unknown.txt", ""},
 		{"Package.ZIP", "zip"}, // Case insensitive
 		{"package.TAR.GZ", "tar.gz"},
@@ -352,6 +355,50 @@ func TestOpenDetectsExtensionlessArchives(t *testing.T) {
 			}
 			if len(files) == 0 {
 				t.Fatal("archive contains no files")
+			}
+		})
+	}
+}
+
+func TestOpenRegistryArtifactExtensions(t *testing.T) {
+	tests := []struct {
+		filename string
+		data     []byte
+		want     string
+	}{
+		{"serde-1.0.0.crate", createTestTarGz(), "*archives.tarReader"},
+		{"extension-1.0.0.vsix", createTestZip(), "*archives.zipReader"},
+		{"android.apk", createTestZip(), "*archives.zipReader"},
+		{"alpine.apk", createTestTarGz(), "*archives.tarReader"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.filename+"/Open", func(t *testing.T) {
+			reader, err := Open(test.filename, bytes.NewReader(test.data))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = reader.Close() }()
+			if got := fmt.Sprintf("%T", reader); got != test.want {
+				t.Fatalf("reader = %s, want %s", got, test.want)
+			}
+			files, err := reader.List()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(files) == 0 {
+				t.Fatal("archive contains no files")
+			}
+		})
+
+		t.Run(test.filename+"/OpenBytes", func(t *testing.T) {
+			reader, err := OpenBytes(test.filename, test.data)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = reader.Close() }()
+			if got := fmt.Sprintf("%T", reader); got != test.want {
+				t.Fatalf("reader = %s, want %s", got, test.want)
 			}
 		})
 	}

@@ -8,9 +8,23 @@ import (
 	"strings"
 )
 
+// zipUnixModeShift is the bit offset of the Unix st_mode field within a
+// ZIP entry's external attributes word. Unix permissions are only present
+// when the creator system in CreatorVersion is Unix or macOS; other creators
+// may store unrelated data in the high word, and archive/zip.FileHeader.Mode
+// then returns a synthesised 0666/0444 that callers should not treat as a
+// stored mode.
+const (
+	zipUnixModeShift = 16
+	zipCreatorShift  = 8
+	zipCreatorUnix   = 3
+	zipCreatorMacOSX = 19
+)
+
 type zipReader struct {
 	raw    []byte
 	reader *zip.Reader
+	index  map[string]*zip.File
 }
 
 func openZip(raw []byte) (*zipReader, error) {
@@ -19,9 +33,17 @@ func openZip(raw []byte) (*zipReader, error) {
 		return nil, fmt.Errorf("opening zip: %w", err)
 	}
 
+	index := make(map[string]*zip.File, len(reader.File))
+	for _, f := range reader.File {
+		if _, seen := index[f.Name]; !seen {
+			index[f.Name] = f
+		}
+	}
+
 	return &zipReader{
 		raw:    raw,
 		reader: reader,
+		index:  index,
 	}, nil
 }
 
@@ -77,17 +99,14 @@ func (z *zipReader) ListDir(dirPath string) ([]FileInfo, error) {
 }
 
 func (z *zipReader) Extract(filePath string) (io.ReadCloser, error) {
-	// Find the file
-	for _, f := range z.reader.File {
-		if f.Name == filePath {
-			if f.FileInfo().IsDir() {
-				return nil, fmt.Errorf("path is a directory: %s", filePath)
-			}
-			return f.Open()
-		}
+	f, ok := z.index[filePath]
+	if !ok {
+		return nil, fmt.Errorf("file not found: %s", filePath)
 	}
-
-	return nil, fmt.Errorf("file not found: %s", filePath)
+	if f.FileInfo().IsDir() {
+		return nil, fmt.Errorf("path is a directory: %s", filePath)
+	}
+	return f.Open()
 }
 
 func (z *zipReader) Hash(algo string) (string, error) {
@@ -97,6 +116,7 @@ func (z *zipReader) Hash(algo string) (string, error) {
 func (z *zipReader) Close() error {
 	z.raw = nil
 	z.reader = nil
+	z.index = nil
 	return nil
 }
 
@@ -109,6 +129,16 @@ func fileInfoFromZip(f *zip.File) FileInfo {
 		ModTime:        f.Modified,
 		IsDir:          f.FileInfo().IsDir(),
 		Mode:           uint32(f.Mode()),
+		HasMode:        zipHasUnixMode(&f.FileHeader),
+	}
+}
+
+func zipHasUnixMode(h *zip.FileHeader) bool {
+	switch h.CreatorVersion >> zipCreatorShift {
+	case zipCreatorUnix, zipCreatorMacOSX:
+		return h.ExternalAttrs>>zipUnixModeShift != 0
+	default:
+		return false
 	}
 }
 

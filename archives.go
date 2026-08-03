@@ -39,6 +39,7 @@ type FileInfo struct {
 	ModTime        time.Time // Modification time
 	IsDir          bool      // Whether this is a directory
 	Mode           uint32    // File mode/permissions
+	HasMode        bool      // Whether Mode was recorded by the archive
 	CompressedSize int64     // Compressed size (if available)
 }
 

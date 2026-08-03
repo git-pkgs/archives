@@ -105,6 +105,9 @@ func extractEntry(r Reader, root *os.Root, entry FileInfo) (*deferredChmod, erro
 	}
 	defer func() { _ = src.Close() }()
 
+	// Perm() masks to the low nine bits, so setuid/setgid/sticky are dropped
+	// deliberately: extracted registry archives are untrusted and should not
+	// be able to plant privilege-escalating bits on disk.
 	perm := fs.FileMode(extractFilePerm)
 	if entry.HasMode {
 		perm = fs.FileMode(entry.Mode).Perm()

@@ -38,7 +38,7 @@ type FileInfo struct {
 	Size           int64     // Uncompressed size in bytes
 	ModTime        time.Time // Modification time
 	IsDir          bool      // Whether this is a directory
-	Mode           uint32    // File mode/permissions
+	Mode           uint32    // fs.FileMode value: permission bits plus fs.ModeType bits
 	HasMode        bool      // Whether Mode was recorded by the archive
 	CompressedSize int64     // Compressed size (if available)
 }

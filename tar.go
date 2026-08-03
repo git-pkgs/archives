@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"strings"
 
 	"github.com/ulikunitz/xz"
@@ -20,6 +21,7 @@ var ErrDecompressLimit = errors.New("decompressed content exceeds size limit")
 type tarReader struct {
 	raw   []byte
 	files []tarFileEntry
+	index map[string]int
 }
 
 type tarFileEntry struct {
@@ -62,13 +64,22 @@ func openTar(raw []byte, compression string) (*tarReader, error) {
 			return nil, fmt.Errorf("reading tar: %w", err)
 		}
 
+		// FileInfo().Mode() combines header.Mode permission bits with type
+		// bits derived from Typeflag. It reports hard links as regular
+		// files, so mark them irregular explicitly since a hard-link entry
+		// carries no data of its own.
+		mode := header.FileInfo().Mode()
+		if header.Typeflag == tar.TypeLink {
+			mode |= fs.ModeIrregular
+		}
 		info := FileInfo{
 			Path:    header.Name,
 			Name:    extractName(header.Name),
 			Size:    header.Size,
 			ModTime: header.ModTime,
 			IsDir:   header.Typeflag == tar.TypeDir,
-			Mode:    uint32(header.Mode),
+			Mode:    uint32(mode),
+			HasMode: true,
 		}
 
 		var data []byte
@@ -90,7 +101,14 @@ func openTar(raw []byte, compression string) (*tarReader, error) {
 		})
 	}
 
-	return &tarReader{raw: raw, files: files}, nil
+	index := make(map[string]int, len(files))
+	for i, f := range files {
+		if _, seen := index[f.info.Path]; !seen {
+			index[f.info.Path] = i
+		}
+	}
+
+	return &tarReader{raw: raw, files: files, index: index}, nil
 }
 
 func (t *tarReader) List() ([]FileInfo, error) {
@@ -140,15 +158,15 @@ func (t *tarReader) ListDir(dirPath string) ([]FileInfo, error) {
 }
 
 func (t *tarReader) Extract(filePath string) (io.ReadCloser, error) {
-	for _, f := range t.files {
-		if f.info.Path == filePath {
-			if f.info.IsDir {
-				return nil, fmt.Errorf("path is a directory: %s", filePath)
-			}
-			return io.NopCloser(bytes.NewReader(f.data)), nil
-		}
+	i, ok := t.index[filePath]
+	if !ok {
+		return nil, fmt.Errorf("file not found: %s", filePath)
 	}
-	return nil, fmt.Errorf("file not found: %s", filePath)
+	f := t.files[i]
+	if f.info.IsDir {
+		return nil, fmt.Errorf("path is a directory: %s", filePath)
+	}
+	return io.NopCloser(bytes.NewReader(f.data)), nil
 }
 
 func (t *tarReader) Hash(algo string) (string, error) {
@@ -158,5 +176,6 @@ func (t *tarReader) Hash(algo string) (string, error) {
 func (t *tarReader) Close() error {
 	t.raw = nil
 	t.files = nil
+	t.index = nil
 	return nil
 }

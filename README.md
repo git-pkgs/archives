@@ -81,6 +81,21 @@ reader, _ := archives.OpenWithPrefix("pkg.tgz", f, "package/")
 // files are now accessible without the package/ prefix
 ```
 
+### Extracting to disk
+
+`ExtractAll` writes every entry under a target directory, creating it and any intermediate directories. Entry names are validated with `filepath.Localize` so absolute paths and `..` segments that would escape the target return `ErrUnsafePath` naming the offending entry.
+
+```go
+reader, _ := archives.Open("pkg.whl", f)
+defer reader.Close()
+
+if err := archives.ExtractAll(reader, dir); err != nil {
+    return err
+}
+```
+
+File permissions are preserved where the archive records them. Entries that the format marks as symlinks or other non-regular types are skipped.
+
 ### Comparing versions
 
 The `diff` subpackage compares two archives and produces unified diffs. It classifies each file as added, deleted, modified, or binary, and includes line-level diff output for text files.

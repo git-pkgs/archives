@@ -1,9 +1,13 @@
 // Package archives provides in-memory archive reading and browsing capabilities.
 //
 // It supports multiple archive formats including:
-//   - ZIP (.zip, .jar, .whl, .nupkg)
-//   - TAR (.tar, .tar.gz, .tgz, .tar.bz2, .tar.xz)
+//   - ZIP (.zip, .jar, .whl, .nupkg, .egg, .vsix)
+//   - TAR (.tar, .tar.gz, .tgz, .crate, .tar.bz2, .tar.xz)
 //   - GEM (.gem - Ruby gems with nested tar structure)
+//
+// The .apk extension is routed by content since Android packages are ZIP
+// and Alpine packages are gzipped tar. Filenames without a recognised
+// extension are opened by inspecting the first bytes.
 //
 // The package is designed to work entirely in memory without writing to disk,
 // making it suitable for browsing cached artifacts on-demand.
@@ -205,14 +209,16 @@ func detectFormat(filename string) string {
 		return formatTarXZ
 	}
 
-	// Check simple extensions
+	// Check simple extensions. .apk is deliberately absent: Alpine packages
+	// are gzipped tarballs and Android packages are zips, so it falls
+	// through to content sniffing.
 	ext := path.Ext(filename)
 	switch ext {
-	case ".zip", ".jar", ".whl", ".nupkg", ".egg":
+	case ".zip", ".jar", ".whl", ".nupkg", ".egg", ".vsix":
 		return formatZIP
 	case ".tar":
 		return formatTAR
-	case ".tgz":
+	case ".tgz", ".crate":
 		return formatTGZ
 	case ".gem":
 		return formatGem

@@ -99,9 +99,12 @@ for _, f := range result.Files {
 
 ## Supported formats
 
-- `.zip`, `.jar`, `.whl`, `.nupkg`, `.egg` (ZIP-based)
-- `.tar`, `.tar.gz`, `.tgz`, `.tar.bz2`, `.tar.xz`
+- `.zip`, `.jar`, `.whl`, `.nupkg`, `.egg`, `.vsix` (ZIP-based)
+- `.tar`, `.tar.gz`, `.tgz`, `.crate`, `.tar.bz2`, `.tar.xz`
 - `.gem` (Ruby gems with nested data.tar.gz)
+- `.apk` (routed by content: Android packages open as ZIP, Alpine packages open as gzipped tar)
+
+Filenames without a recognised extension are opened by inspecting the first bytes for a ZIP, tar, gzip, bzip2, or xz signature.
 
 ## License
 

@@ -4,6 +4,7 @@
 //   - ZIP (.zip, .jar, .whl, .nupkg, .egg, .vsix)
 //   - TAR (.tar, .tar.gz, .tgz, .crate, .tar.bz2, .tar.xz, .tar.zst)
 //   - GEM (.gem - Ruby gems with nested tar structure)
+//   - CONDA (.conda - v2 conda packages, zip of zstd tarballs)
 //
 // The .apk extension is routed by content since Android packages are ZIP
 // and Alpine packages are gzipped tar. Filenames without a recognised
@@ -33,6 +34,7 @@ const (
 	formatTarXZ      = "tar.xz"
 	formatTarZstd    = "tar.zst"
 	formatGem        = "gem"
+	formatConda      = "conda"
 	contentSniffSize = 512
 )
 
@@ -135,6 +137,8 @@ func openRaw(format string, raw []byte) (Reader, error) {
 		return openTar(raw, "zstd")
 	case formatGem:
 		return openGem(raw)
+	case formatConda:
+		return openConda(raw)
 	default:
 		return nil, fmt.Errorf("unsupported format: %s", format)
 	}
@@ -231,6 +235,8 @@ func detectFormat(filename string) string {
 		return formatTGZ
 	case ".gem":
 		return formatGem
+	case ".conda":
+		return formatConda
 	default:
 		return ""
 	}

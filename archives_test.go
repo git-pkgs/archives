@@ -34,6 +34,7 @@ func TestDetectFormat(t *testing.T) {
 		{"package.tar.xz", "tar.xz"},
 		{"package.tar.zst", "tar.zst"},
 		{"package.gem", "gem"},
+		{"package.conda", "conda"},
 		{"package.vsix", "zip"},
 		{"package.crate", "tgz"},
 		{"package.apk", ""}, // Ambiguous: routed by content sniff

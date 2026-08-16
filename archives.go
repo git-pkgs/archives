@@ -2,7 +2,7 @@
 //
 // It supports multiple archive formats including:
 //   - ZIP (.zip, .jar, .whl, .nupkg, .egg, .vsix)
-//   - TAR (.tar, .tar.gz, .tgz, .crate, .tar.bz2, .tar.xz)
+//   - TAR (.tar, .tar.gz, .tgz, .crate, .tar.bz2, .tar.xz, .tar.zst)
 //   - GEM (.gem - Ruby gems with nested tar structure)
 //
 // The .apk extension is routed by content since Android packages are ZIP
@@ -31,6 +31,7 @@ const (
 	formatTGZ        = "tgz"
 	formatTarBzip2   = "tar.bz2"
 	formatTarXZ      = "tar.xz"
+	formatTarZstd    = "tar.zst"
 	formatGem        = "gem"
 	contentSniffSize = 512
 )
@@ -130,6 +131,8 @@ func openRaw(format string, raw []byte) (Reader, error) {
 		return openTar(raw, "bzip2")
 	case formatTarXZ:
 		return openTar(raw, "xz")
+	case formatTarZstd:
+		return openTar(raw, "zstd")
 	case formatGem:
 		return openGem(raw)
 	default:
@@ -157,6 +160,8 @@ func archiveFormat(detected string) string {
 		return formatTarBzip2
 	case "xz":
 		return formatTarXZ
+	case "zstd":
+		return formatTarZstd
 	default:
 		return ""
 	}
@@ -208,6 +213,9 @@ func detectFormat(filename string) string {
 	}
 	if strings.HasSuffix(filename, ".tar.xz") {
 		return formatTarXZ
+	}
+	if strings.HasSuffix(filename, ".tar.zst") {
+		return formatTarZstd
 	}
 
 	// Check simple extensions. .apk is deliberately absent: Alpine packages

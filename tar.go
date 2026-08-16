@@ -11,6 +11,7 @@ import (
 	"io/fs"
 	"strings"
 
+	"github.com/klauspost/compress/zstd"
 	"github.com/ulikunitz/xz"
 )
 
@@ -49,6 +50,13 @@ func openTar(raw []byte, compression string) (*tarReader, error) {
 			return nil, fmt.Errorf("opening xz: %w", err)
 		}
 		r = xzReader
+	case "zstd":
+		dec, err := zstd.NewReader(content, zstd.WithDecoderConcurrency(1))
+		if err != nil {
+			return nil, fmt.Errorf("opening zstd: %w", err)
+		}
+		defer dec.Close()
+		r = dec
 	}
 
 	tr := tar.NewReader(r)

@@ -1,6 +1,6 @@
 # archives
 
-A Go library for reading and browsing archive files in memory. Supports ZIP, TAR (with gzip, bzip2, xz compression), and Ruby gem formats.
+A Go library for reading and browsing archive files in memory. Supports ZIP, TAR (with gzip, bzip2, xz, zstd compression), and Ruby gem formats.
 
 ## Installation
 
@@ -67,7 +67,7 @@ reader, _ := archives.OpenBytes("pkg.tgz", data)
 ```
 
 Filename mappings are used first. When a name has no supported extension,
-`Open` and `OpenBytes` detect ZIP, TAR, gzip, bzip2, and xz from the content.
+`Open` and `OpenBytes` detect ZIP, TAR, gzip, bzip2, xz, and zstd from the content.
 Compressed content is opened as TAR and returns a parser error when it does not
 contain a TAR archive. `Open` reads at most 512 bytes before rejecting an
 unsupported stream with no recognised extension.
@@ -115,11 +115,11 @@ for _, f := range result.Files {
 ## Supported formats
 
 - `.zip`, `.jar`, `.whl`, `.nupkg`, `.egg`, `.vsix` (ZIP-based)
-- `.tar`, `.tar.gz`, `.tgz`, `.crate`, `.tar.bz2`, `.tar.xz`
+- `.tar`, `.tar.gz`, `.tgz`, `.crate`, `.tar.bz2`, `.tar.xz`, `.tar.zst`
 - `.gem` (Ruby gems with nested data.tar.gz)
 - `.apk` (routed by content: Android packages open as ZIP, Alpine packages open as gzipped tar)
 
-Filenames without a recognised extension are opened by inspecting the first bytes for a ZIP, tar, gzip, bzip2, or xz signature.
+Filenames without a recognised extension are opened by inspecting the first bytes for a ZIP, tar, gzip, bzip2, xz, or zstd signature.
 
 ## License
 

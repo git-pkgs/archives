@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/klauspost/compress/zstd"
 	"github.com/ulikunitz/xz"
 )
 
@@ -31,6 +32,7 @@ func TestDetectFormat(t *testing.T) {
 		{"package.tgz", "tgz"},
 		{"package.tar.bz2", "tar.bz2"},
 		{"package.tar.xz", "tar.xz"},
+		{"package.tar.zst", "tar.zst"},
 		{"package.gem", "gem"},
 		{"package.vsix", "zip"},
 		{"package.crate", "tgz"},
@@ -237,6 +239,22 @@ func createTestTarBz2(t *testing.T) []byte {
 	return data
 }
 
+func createTestTarZst(t *testing.T) []byte {
+	t.Helper()
+	buf := new(bytes.Buffer)
+	w, err := zstd.NewWriter(buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.Write(createTestTar()); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
+}
+
 func createTestTarXz(t *testing.T) []byte {
 	t.Helper()
 	buf := new(bytes.Buffer)
@@ -326,6 +344,7 @@ func TestOpenDetectsExtensionlessArchives(t *testing.T) {
 		{"gzip", createTestTarGz()},
 		{"bzip2", createTestTarBz2(t)},
 		{"xz", createTestTarXz(t)},
+		{"zstd", createTestTarZst(t)},
 	}
 	for _, test := range tests {
 		t.Run(test.name+"/Open", func(t *testing.T) {

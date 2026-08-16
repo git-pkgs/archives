@@ -1,6 +1,6 @@
 # archives
 
-A Go library for reading and browsing archive files in memory. Supports ZIP, TAR (with gzip, bzip2, xz, zstd compression), and Ruby gem formats.
+A Go library for reading and browsing archive files in memory. Supports ZIP, TAR (with gzip, bzip2, xz, zstd compression), Ruby gem, and conda formats.
 
 ## Installation
 
@@ -117,6 +117,7 @@ for _, f := range result.Files {
 - `.zip`, `.jar`, `.whl`, `.nupkg`, `.egg`, `.vsix` (ZIP-based)
 - `.tar`, `.tar.gz`, `.tgz`, `.crate`, `.tar.bz2`, `.tar.xz`, `.tar.zst`
 - `.gem` (Ruby gems with nested data.tar.gz)
+- `.conda` (v2 conda packages: zip of `pkg-*.tar.zst` and `info-*.tar.zst`, presented as one merged tar)
 - `.apk` (routed by content: Android packages open as ZIP, Alpine packages open as gzipped tar)
 
 Filenames without a recognised extension are opened by inspecting the first bytes for a ZIP, tar, gzip, bzip2, xz, or zstd signature.

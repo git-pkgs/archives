@@ -22,6 +22,9 @@ func openConda(raw []byte) (*tarReader, error) {
 	if err != nil {
 		return nil, fmt.Errorf("opening conda zip: %w", err)
 	}
+	if err := checkArchiveEntryCount(len(zr.File)); err != nil {
+		return nil, err
+	}
 
 	var files []tarFileEntry
 	var total int64
@@ -39,6 +42,9 @@ func openConda(raw []byte) (*tarReader, error) {
 		total += size
 		if total > maxDecompressedSize {
 			return nil, fmt.Errorf("%w: exceeds %d bytes", ErrDecompressLimit, maxDecompressedSize)
+		}
+		if err := checkArchiveEntryCount(len(files) + len(entries)); err != nil {
+			return nil, err
 		}
 		files = append(files, entries...)
 	}

@@ -186,6 +186,17 @@ func TestOpenCondaRejectsCumulativeOverflow(t *testing.T) {
 	}
 }
 
+func TestOpenCondaRejectsTooManyEntriesAcrossMembers(t *testing.T) {
+	oldMax := maxArchiveEntries
+	maxArchiveEntries = 3
+	defer func() { maxArchiveEntries = oldMax }()
+
+	_, err := openConda(createTestConda(t))
+	if !errors.Is(err, ErrEntryLimit) {
+		t.Fatalf("expected ErrEntryLimit, got: %v", err)
+	}
+}
+
 func TestOpenDoesNotInferConda(t *testing.T) {
 	reader, err := OpenBytes("artifact", createTestConda(t))
 	if err != nil {

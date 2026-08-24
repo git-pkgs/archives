@@ -15,9 +15,13 @@ import (
 	"github.com/ulikunitz/xz"
 )
 
-var maxDecompressedSize int64 = 512 << 20 // 512 MiB
+var (
+	maxDecompressedSize int64 = 512 << 20 // 512 MiB
+	maxArchiveEntries         = 100_000
+)
 
 var ErrDecompressLimit = errors.New("decompressed content exceeds size limit")
+var ErrEntryLimit = errors.New("archive entry count exceeds limit")
 
 type tarReader struct {
 	raw   []byte
@@ -71,6 +75,9 @@ func openTar(raw []byte, compression string) (*tarReader, error) {
 		if err != nil {
 			return nil, fmt.Errorf("reading tar: %w", err)
 		}
+		if err := checkArchiveEntryCount(len(files) + 1); err != nil {
+			return nil, err
+		}
 
 		// FileInfo().Mode() combines header.Mode permission bits with type
 		// bits derived from Typeflag. It reports hard links as regular
@@ -117,6 +124,13 @@ func openTar(raw []byte, compression string) (*tarReader, error) {
 	}
 
 	return &tarReader{raw: raw, files: files, index: index}, nil
+}
+
+func checkArchiveEntryCount(count int) error {
+	if count > maxArchiveEntries {
+		return fmt.Errorf("%w: %d entries exceeds %d", ErrEntryLimit, count, maxArchiveEntries)
+	}
+	return nil
 }
 
 func (t *tarReader) List() ([]FileInfo, error) {

@@ -32,6 +32,9 @@ func openZip(raw []byte) (*zipReader, error) {
 	if err != nil {
 		return nil, fmt.Errorf("opening zip: %w", err)
 	}
+	if err := checkArchiveEntryCount(len(reader.File)); err != nil {
+		return nil, err
+	}
 
 	index := make(map[string]*zip.File, len(reader.File))
 	for _, f := range reader.File {

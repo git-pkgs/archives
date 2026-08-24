@@ -858,6 +858,60 @@ func TestOpenTarRejectsCumulativeOverflow(t *testing.T) {
 	}
 }
 
+func TestOpenTarRejectsTooManyEntries(t *testing.T) {
+	oldMax := maxArchiveEntries
+	maxArchiveEntries = 2
+	defer func() { maxArchiveEntries = oldMax }()
+
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	for i := 0; i < 3; i++ {
+		_ = tw.WriteHeader(&tar.Header{Name: fmt.Sprintf("empty-%d", i), Mode: 0644})
+	}
+	_ = tw.Close()
+
+	_, err := openTar(buf.Bytes(), "")
+	if !errors.Is(err, ErrEntryLimit) {
+		t.Fatalf("expected ErrEntryLimit, got: %v", err)
+	}
+}
+
+func TestOpenZipRejectsTooManyEntries(t *testing.T) {
+	oldMax := maxArchiveEntries
+	maxArchiveEntries = 2
+	defer func() { maxArchiveEntries = oldMax }()
+
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	for i := 0; i < 3; i++ {
+		_, _ = zw.Create(fmt.Sprintf("empty-%d", i))
+	}
+	_ = zw.Close()
+
+	_, err := openZip(buf.Bytes())
+	if !errors.Is(err, ErrEntryLimit) {
+		t.Fatalf("expected ErrEntryLimit, got: %v", err)
+	}
+}
+
+func TestOpenGemRejectsTooManyEntries(t *testing.T) {
+	oldMax := maxArchiveEntries
+	maxArchiveEntries = 2
+	defer func() { maxArchiveEntries = oldMax }()
+
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	for i := 0; i < 3; i++ {
+		_ = tw.WriteHeader(&tar.Header{Name: fmt.Sprintf("empty-%d", i), Mode: 0644})
+	}
+	_ = tw.Close()
+
+	_, err := openGem(buf.Bytes())
+	if !errors.Is(err, ErrEntryLimit) {
+		t.Fatalf("expected ErrEntryLimit, got: %v", err)
+	}
+}
+
 func TestOpenGemRejectsOversizedData(t *testing.T) {
 	oldMax := maxDecompressedSize
 	maxDecompressedSize = 512

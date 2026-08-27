@@ -197,6 +197,44 @@ func TestOpenCondaRejectsTooManyEntriesAcrossMembers(t *testing.T) {
 	}
 }
 
+func TestOpenCondaStopsAtCombinedEntryLimit(t *testing.T) {
+	oldEntryMax := maxArchiveEntries
+	oldSizeMax := maxDecompressedSize
+	maxArchiveEntries = 2
+	maxDecompressedSize = 512
+	defer func() {
+		maxArchiveEntries = oldEntryMax
+		maxDecompressedSize = oldSizeMax
+	}()
+
+	members := []struct {
+		name string
+		data []byte
+	}{
+		{"pkg-a-1.tar.zst", writeTarZst(t, map[string]string{"first": "", "second": ""})},
+		{"info-a-1.tar.zst", writeTarZst(t, map[string]string{"large": strings.Repeat("x", 1024)})},
+	}
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	for _, member := range members {
+		w, err := zw.CreateHeader(&zip.FileHeader{Name: member.name, Method: zip.Store})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := w.Write(member.data); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := OpenBytes("a.conda", buf.Bytes())
+	if !errors.Is(err, ErrEntryLimit) {
+		t.Fatalf("expected ErrEntryLimit before reading the next member, got: %v", err)
+	}
+}
+
 func TestOpenDoesNotInferConda(t *testing.T) {
 	reader, err := OpenBytes("artifact", createTestConda(t))
 	if err != nil {

@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"encoding/base64"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -887,8 +888,15 @@ func TestOpenZipRejectsTooManyEntries(t *testing.T) {
 		_, _ = zw.Create(fmt.Sprintf("empty-%d", i))
 	}
 	_ = zw.Close()
+	raw := buf.Bytes()
+	directoryEnd := bytes.LastIndex(raw, []byte{'P', 'K', 0x05, 0x06})
+	if directoryEnd < 0 {
+		t.Fatal("zip end-of-directory record not found")
+	}
+	binary.LittleEndian.PutUint16(raw[directoryEnd+8:], 1)
+	binary.LittleEndian.PutUint16(raw[directoryEnd+10:], 1)
 
-	_, err := openZip(buf.Bytes())
+	_, err := OpenBytes("too-many.zip", raw)
 	if !errors.Is(err, ErrEntryLimit) {
 		t.Fatalf("expected ErrEntryLimit, got: %v", err)
 	}

@@ -233,6 +233,9 @@ func TestOpenCondaStopsAtCombinedEntryLimit(t *testing.T) {
 	if !errors.Is(err, ErrEntryLimit) {
 		t.Fatalf("expected ErrEntryLimit before reading the next member, got: %v", err)
 	}
+	if !strings.Contains(err.Error(), "count 3 exceeds 2") {
+		t.Fatalf("expected combined entry count in error, got: %v", err)
+	}
 }
 
 func TestOpenDoesNotInferConda(t *testing.T) {

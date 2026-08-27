@@ -35,10 +35,10 @@ type tarFileEntry struct {
 }
 
 func openTar(raw []byte, compression string) (*tarReader, error) {
-	return openTarWithEntryLimit(raw, compression, maxArchiveEntries)
+	return openTarWithInitialEntryCount(raw, compression, 0)
 }
 
-func openTarWithEntryLimit(raw []byte, compression string, entryLimit int) (*tarReader, error) {
+func openTarWithInitialEntryCount(raw []byte, compression string, initialEntryCount int) (*tarReader, error) {
 	content := bytes.NewReader(raw)
 	r := io.Reader(content)
 
@@ -79,7 +79,7 @@ func openTarWithEntryLimit(raw []byte, compression string, entryLimit int) (*tar
 		if err != nil {
 			return nil, fmt.Errorf("reading tar: %w", err)
 		}
-		if err := checkArchiveEntryCountLimit(len(files)+1, entryLimit); err != nil {
+		if err := checkArchiveEntryCount(initialEntryCount + len(files) + 1); err != nil {
 			return nil, err
 		}
 
@@ -131,12 +131,8 @@ func openTarWithEntryLimit(raw []byte, compression string, entryLimit int) (*tar
 }
 
 func checkArchiveEntryCount(count int) error {
-	return checkArchiveEntryCountLimit(count, maxArchiveEntries)
-}
-
-func checkArchiveEntryCountLimit(count, limit int) error {
-	if count > limit {
-		return fmt.Errorf("%w: count %d exceeds %d", ErrEntryLimit, count, limit)
+	if count > maxArchiveEntries {
+		return fmt.Errorf("%w: count %d exceeds %d", ErrEntryLimit, count, maxArchiveEntries)
 	}
 	return nil
 }

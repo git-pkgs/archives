@@ -18,9 +18,15 @@ import (
 // merged tarReader with raw pointing at the outer .conda bytes so Hash
 // matches the digest anaconda.org publishes in repodata.json.
 func openConda(raw []byte) (*tarReader, error) {
+	if err := checkZipEntryCount(raw); err != nil {
+		return nil, err
+	}
 	zr, err := zip.NewReader(bytes.NewReader(raw), int64(len(raw)))
 	if err != nil {
 		return nil, fmt.Errorf("opening conda zip: %w", err)
+	}
+	if err := checkArchiveEntryCount(len(zr.File)); err != nil {
+		return nil, err
 	}
 
 	var files []tarFileEntry
@@ -32,7 +38,7 @@ func openConda(raw []byte) (*tarReader, error) {
 		if !strings.HasPrefix(f.Name, "pkg-") && !strings.HasPrefix(f.Name, "info-") {
 			continue
 		}
-		entries, size, err := readCondaMember(f)
+		entries, size, err := readCondaMember(f, len(files))
 		if err != nil {
 			return nil, err
 		}
@@ -56,7 +62,7 @@ func openConda(raw []byte) (*tarReader, error) {
 	return &tarReader{raw: raw, files: files, index: index}, nil
 }
 
-func readCondaMember(f *zip.File) ([]tarFileEntry, int64, error) {
+func readCondaMember(f *zip.File, initialEntryCount int) ([]tarFileEntry, int64, error) {
 	rc, err := f.Open()
 	if err != nil {
 		return nil, 0, fmt.Errorf("opening %s: %w", f.Name, err)
@@ -71,7 +77,7 @@ func readCondaMember(f *zip.File) ([]tarFileEntry, int64, error) {
 		return nil, 0, fmt.Errorf("%w: %s exceeds %d bytes", ErrDecompressLimit, f.Name, maxDecompressedSize)
 	}
 
-	tr, err := openTar(data, "zstd")
+	tr, err := openTarWithInitialEntryCount(data, "zstd", initialEntryCount)
 	if err != nil {
 		return nil, 0, fmt.Errorf("opening %s: %w", f.Name, err)
 	}

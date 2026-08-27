@@ -17,6 +17,7 @@ type gemReader struct {
 
 func openGem(raw []byte) (*gemReader, error) {
 	tr := tar.NewReader(bytes.NewReader(raw))
+	entryCount := 0
 
 	// Find data.tar.gz in the gem
 	for {
@@ -26,6 +27,10 @@ func openGem(raw []byte) (*gemReader, error) {
 		}
 		if err != nil {
 			return nil, fmt.Errorf("reading gem tar: %w", err)
+		}
+		entryCount++
+		if err := checkArchiveEntryCount(entryCount); err != nil {
+			return nil, err
 		}
 
 		// Look for data.tar.gz

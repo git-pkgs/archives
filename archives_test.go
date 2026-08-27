@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"encoding/base64"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -855,6 +856,67 @@ func TestOpenTarRejectsCumulativeOverflow(t *testing.T) {
 	}
 	if !errors.Is(err, ErrDecompressLimit) {
 		t.Fatalf("expected ErrDecompressLimit, got: %v", err)
+	}
+}
+
+func TestOpenTarRejectsTooManyEntries(t *testing.T) {
+	oldMax := maxArchiveEntries
+	maxArchiveEntries = 2
+	defer func() { maxArchiveEntries = oldMax }()
+
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	for i := 0; i < 3; i++ {
+		_ = tw.WriteHeader(&tar.Header{Name: fmt.Sprintf("empty-%d", i), Mode: 0644})
+	}
+	_ = tw.Close()
+
+	_, err := openTar(buf.Bytes(), "")
+	if !errors.Is(err, ErrEntryLimit) {
+		t.Fatalf("expected ErrEntryLimit, got: %v", err)
+	}
+}
+
+func TestOpenZipRejectsTooManyEntries(t *testing.T) {
+	oldMax := maxArchiveEntries
+	maxArchiveEntries = 2
+	defer func() { maxArchiveEntries = oldMax }()
+
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	for i := 0; i < 3; i++ {
+		_, _ = zw.Create(fmt.Sprintf("empty-%d", i))
+	}
+	_ = zw.Close()
+	raw := buf.Bytes()
+	directoryEnd := bytes.LastIndex(raw, []byte{'P', 'K', 0x05, 0x06})
+	if directoryEnd < 0 {
+		t.Fatal("zip end-of-directory record not found")
+	}
+	binary.LittleEndian.PutUint16(raw[directoryEnd+8:], 1)
+	binary.LittleEndian.PutUint16(raw[directoryEnd+10:], 1)
+
+	_, err := OpenBytes("too-many.zip", raw)
+	if !errors.Is(err, ErrEntryLimit) {
+		t.Fatalf("expected ErrEntryLimit, got: %v", err)
+	}
+}
+
+func TestOpenGemRejectsTooManyEntries(t *testing.T) {
+	oldMax := maxArchiveEntries
+	maxArchiveEntries = 2
+	defer func() { maxArchiveEntries = oldMax }()
+
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	for i := 0; i < 3; i++ {
+		_ = tw.WriteHeader(&tar.Header{Name: fmt.Sprintf("empty-%d", i), Mode: 0644})
+	}
+	_ = tw.Close()
+
+	_, err := openGem(buf.Bytes())
+	if !errors.Is(err, ErrEntryLimit) {
+		t.Fatalf("expected ErrEntryLimit, got: %v", err)
 	}
 }
 

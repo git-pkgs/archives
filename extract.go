@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"math"
 	"os"
 	"path"
 	"path/filepath"
@@ -26,7 +27,7 @@ const (
 )
 
 type extractConfig struct {
-	remaining *int64
+	maxBytes int64
 }
 
 // ExtractOption configures ExtractAll.
@@ -37,11 +38,7 @@ type ExtractOption func(*extractConfig)
 // not header-declared sizes, so an archive whose headers under-report content
 // still cannot exceed it. A value of zero or less disables the limit.
 func WithMaxBytes(n int64) ExtractOption {
-	return func(c *extractConfig) {
-		if n > 0 {
-			c.remaining = &n
-		}
-	}
+	return func(c *extractConfig) { c.maxBytes = n }
 }
 
 type deferredChmod struct {
@@ -65,6 +62,11 @@ func ExtractAll(r Reader, dir string, opts ...ExtractOption) error {
 	for _, opt := range opts {
 		opt(&cfg)
 	}
+	var remaining *int64
+	if cfg.maxBytes > 0 {
+		n := cfg.maxBytes
+		remaining = &n
+	}
 
 	if err := os.MkdirAll(dir, extractDirPerm); err != nil {
 		return err
@@ -82,7 +84,7 @@ func ExtractAll(r Reader, dir string, opts ...ExtractOption) error {
 
 	var dirModes []deferredChmod
 	for _, entry := range entries {
-		dm, err := extractEntry(r, root, entry, cfg.remaining)
+		dm, err := extractEntry(r, root, entry, remaining)
 		if err != nil {
 			return err
 		}
@@ -206,7 +208,11 @@ func copyWithLimit(dst io.Writer, src io.Reader, remaining *int64) (int64, error
 	}
 	// Read one byte past the budget so an entry that would exceed it is
 	// detected without draining the whole stream.
-	n, err := io.Copy(dst, io.LimitReader(src, *remaining+1))
+	lim := *remaining
+	if lim < math.MaxInt64 {
+		lim++
+	}
+	n, err := io.Copy(dst, io.LimitReader(src, lim))
 	if err != nil {
 		return n, err
 	}

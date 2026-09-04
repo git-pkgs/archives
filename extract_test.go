@@ -455,6 +455,25 @@ func TestExtractAllMaxBytesIgnoresDeclaredSize(t *testing.T) {
 	}
 }
 
+func TestExtractAllMaxBytesOptionReuse(t *testing.T) {
+	buf := new(bytes.Buffer)
+	tw := tar.NewWriter(buf)
+	writeTarFile(t, tw, "a.txt", strings.Repeat("a", 60), 0o644)
+	_ = tw.Close()
+
+	opt := WithMaxBytes(100)
+	for i := range 2 {
+		reader, err := OpenBytes("test.tar", buf.Bytes())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := ExtractAll(reader, t.TempDir(), opt); err != nil {
+			t.Fatalf("call %d: %v", i+1, err)
+		}
+		_ = reader.Close()
+	}
+}
+
 func TestExtractAllWithPrefix(t *testing.T) {
 	reader, err := OpenBytesWithPrefix("test.zip", createTestZip(), "src/")
 	if err != nil {

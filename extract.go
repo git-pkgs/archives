@@ -16,10 +16,29 @@ import (
 // resolve outside the target directory.
 var ErrUnsafePath = errors.New("archive entry escapes target directory")
 
+// ErrExtractLimit is returned by ExtractAll when the total decompressed bytes
+// written would exceed the WithMaxBytes limit.
+var ErrExtractLimit = errors.New("extracted bytes exceed limit")
+
 const (
 	extractDirPerm  = 0o755
 	extractFilePerm = 0o644
 )
+
+type extractConfig struct {
+	maxBytes int64
+}
+
+// ExtractOption configures ExtractAll.
+type ExtractOption func(*extractConfig)
+
+// WithMaxBytes caps the total number of decompressed bytes ExtractAll will
+// write. The limit is enforced against bytes actually read from each entry,
+// not header-declared sizes, so an archive whose headers under-report content
+// still cannot exceed it. A value of zero or less disables the limit.
+func WithMaxBytes(n int64) ExtractOption {
+	return func(c *extractConfig) { c.maxBytes = n }
+}
 
 type deferredChmod struct {
 	path string
@@ -37,7 +56,17 @@ type deferredChmod struct {
 // elements that escape dir, and platform-invalid names cause ExtractAll to
 // return ErrUnsafePath wrapping the offending entry name. Entries that the
 // archive marks as non-regular (symlinks, devices) are skipped.
-func ExtractAll(r Reader, dir string) error {
+func ExtractAll(r Reader, dir string, opts ...ExtractOption) error {
+	var cfg extractConfig
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+	var remaining *int64
+	if cfg.maxBytes > 0 {
+		n := cfg.maxBytes
+		remaining = &n
+	}
+
 	if err := os.MkdirAll(dir, extractDirPerm); err != nil {
 		return err
 	}
@@ -54,7 +83,7 @@ func ExtractAll(r Reader, dir string) error {
 
 	var dirModes []deferredChmod
 	for _, entry := range entries {
-		dm, err := extractEntry(r, root, entry)
+		dm, err := extractEntry(r, root, entry, remaining)
 		if err != nil {
 			return err
 		}
@@ -66,7 +95,7 @@ func ExtractAll(r Reader, dir string) error {
 	return applyDirModes(root, dirModes)
 }
 
-func extractEntry(r Reader, root *os.Root, entry FileInfo) (*deferredChmod, error) {
+func extractEntry(r Reader, root *os.Root, entry FileInfo, remaining *int64) (*deferredChmod, error) {
 	name := path.Clean(strings.TrimSuffix(entry.Path, "/"))
 	if name == "." || name == "" {
 		return nil, nil
@@ -123,8 +152,12 @@ func extractEntry(r Reader, root *os.Root, entry FileInfo) (*deferredChmod, erro
 	if err != nil {
 		return nil, err
 	}
-	if _, err := io.Copy(out, src); err != nil {
+	written, err := copyWithLimit(out, src, remaining)
+	if err != nil {
 		_ = out.Close()
+		if errors.Is(err, ErrExtractLimit) {
+			return nil, fmt.Errorf("%w at %q: wrote %d bytes", err, entry.Path, written)
+		}
 		return nil, fmt.Errorf("writing %s: %w", entry.Path, err)
 	}
 	if entry.HasMode {
@@ -166,4 +199,30 @@ func applyDirModes(root *os.Root, modes []deferredChmod) error {
 
 func depth(p string) int {
 	return strings.Count(p, string(filepath.Separator))
+}
+
+func copyWithLimit(dst io.Writer, src io.Reader, remaining *int64) (int64, error) {
+	if remaining == nil {
+		return io.Copy(dst, src)
+	}
+	lr := &io.LimitedReader{R: src, N: *remaining}
+	n, err := io.Copy(dst, lr)
+	*remaining -= n
+	if err != nil {
+		return n, err
+	}
+	if lr.N > 0 {
+		return n, nil
+	}
+	// Budget exhausted by this entry; probe one byte to see whether src had
+	// more without writing it to dst.
+	var probe [1]byte
+	m, rerr := src.Read(probe[:])
+	if m > 0 {
+		return n, ErrExtractLimit
+	}
+	if rerr != nil && !errors.Is(rerr, io.EOF) {
+		return n, rerr
+	}
+	return n, nil
 }

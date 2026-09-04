@@ -389,6 +389,91 @@ func TestExtractAllSkipsZipSymlink(t *testing.T) {
 	assertFileContent(t, filepath.Join(dir, "regular.txt"), "ok")
 }
 
+func TestExtractAllMaxBytes(t *testing.T) {
+	buf := new(bytes.Buffer)
+	tw := tar.NewWriter(buf)
+	writeTarFile(t, tw, "a.txt", strings.Repeat("a", 40), 0o644)
+	writeTarFile(t, tw, "b.txt", strings.Repeat("b", 40), 0o644)
+	_ = tw.Close()
+
+	tests := []struct {
+		name    string
+		limit   int64
+		wantErr bool
+	}{
+		{"under", 79, true},
+		{"exact", 80, false},
+		{"over", 200, false},
+		{"disabled", 0, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			reader, err := OpenBytes("test.tar", buf.Bytes())
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = reader.Close() }()
+
+			err = ExtractAll(reader, t.TempDir(), WithMaxBytes(tt.limit))
+			if tt.wantErr {
+				if !errors.Is(err, ErrExtractLimit) {
+					t.Fatalf("ExtractAll error = %v, want ErrExtractLimit", err)
+				}
+			} else if err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestExtractAllMaxBytesIgnoresDeclaredSize(t *testing.T) {
+	// zip deflate: 80 zero bytes compress to a handful; the limit must apply
+	// to bytes actually written, not the compressed length.
+	buf := new(bytes.Buffer)
+	zw := zip.NewWriter(buf)
+	w, _ := zw.Create("zeros")
+	_, _ = w.Write(make([]byte, 80))
+	_ = zw.Close()
+
+	reader, err := OpenBytes("test.zip", buf.Bytes())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = reader.Close() }()
+
+	dir := t.TempDir()
+	err = ExtractAll(reader, dir, WithMaxBytes(40))
+	if !errors.Is(err, ErrExtractLimit) {
+		t.Fatalf("ExtractAll error = %v, want ErrExtractLimit", err)
+	}
+	info, statErr := os.Stat(filepath.Join(dir, "zeros"))
+	if statErr != nil {
+		t.Fatal(statErr)
+	}
+	if info.Size() > 40 {
+		t.Fatalf("wrote %d bytes, want <= 40", info.Size())
+	}
+}
+
+func TestExtractAllMaxBytesOptionReuse(t *testing.T) {
+	buf := new(bytes.Buffer)
+	tw := tar.NewWriter(buf)
+	writeTarFile(t, tw, "a.txt", strings.Repeat("a", 60), 0o644)
+	_ = tw.Close()
+
+	opt := WithMaxBytes(100)
+	for i := range 2 {
+		reader, err := OpenBytes("test.tar", buf.Bytes())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := ExtractAll(reader, t.TempDir(), opt); err != nil {
+			t.Fatalf("call %d: %v", i+1, err)
+		}
+		_ = reader.Close()
+	}
+}
+
 func TestExtractAllWithPrefix(t *testing.T) {
 	reader, err := OpenBytesWithPrefix("test.zip", createTestZip(), "src/")
 	if err != nil {

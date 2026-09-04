@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
-	"math"
 	"os"
 	"path"
 	"path/filepath"
@@ -206,19 +205,24 @@ func copyWithLimit(dst io.Writer, src io.Reader, remaining *int64) (int64, error
 	if remaining == nil {
 		return io.Copy(dst, src)
 	}
-	// Read one byte past the budget so an entry that would exceed it is
-	// detected without draining the whole stream.
-	lim := *remaining
-	if lim < math.MaxInt64 {
-		lim++
-	}
-	n, err := io.Copy(dst, io.LimitReader(src, lim))
+	lr := &io.LimitedReader{R: src, N: *remaining}
+	n, err := io.Copy(dst, lr)
+	*remaining -= n
 	if err != nil {
 		return n, err
 	}
-	if n > *remaining {
+	if lr.N > 0 {
+		return n, nil
+	}
+	// Budget exhausted by this entry; probe one byte to see whether src had
+	// more without writing it to dst.
+	var probe [1]byte
+	m, rerr := src.Read(probe[:])
+	if m > 0 {
 		return n, ErrExtractLimit
 	}
-	*remaining -= n
+	if rerr != nil && !errors.Is(rerr, io.EOF) {
+		return n, rerr
+	}
 	return n, nil
 }

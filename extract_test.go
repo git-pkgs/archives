@@ -450,8 +450,8 @@ func TestExtractAllMaxBytesIgnoresDeclaredSize(t *testing.T) {
 	if statErr != nil {
 		t.Fatal(statErr)
 	}
-	if info.Size() > 41 {
-		t.Fatalf("wrote %d bytes past the limit", info.Size())
+	if info.Size() > 40 {
+		t.Fatalf("wrote %d bytes, want <= 40", info.Size())
 	}
 }
 

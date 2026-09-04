@@ -5,7 +5,7 @@ go 1.26
 toolchain go1.26.7
 
 require (
-	github.com/git-pkgs/magic v0.2.0
+	github.com/git-pkgs/magic v0.3.0
 	github.com/klauspost/compress v1.19.2
 	github.com/ulikunitz/xz v0.5.16
 )

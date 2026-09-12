@@ -1,5 +1,5 @@
-github.com/git-pkgs/magic v0.3.0 h1:ZCAdNQUv7rKa3VfIIaygIivlo/yZbpZTVTGAmAaOydM=
-github.com/git-pkgs/magic v0.3.0/go.mod h1:SXOqcsNmbmpZjJZHEEWnwxprbsFvpwWgTAZrgXp4Jm4=
+github.com/git-pkgs/magic v0.3.1 h1:UzjFRyEwJITA/JgznjmIM4VwuBszD2K4Q8XHgkgL+DM=
+github.com/git-pkgs/magic v0.3.1/go.mod h1:SXOqcsNmbmpZjJZHEEWnwxprbsFvpwWgTAZrgXp4Jm4=
 github.com/klauspost/compress v1.20.0 h1:a3C1ke2ohxFymNlb2HWAHjDeKCI90scRskErZkR0ezA=
 github.com/klauspost/compress v1.20.0/go.mod h1:LUdAzn7YLVvxLpc7y3V1m40wESHTgc1422pwwBSKYuI=
 github.com/ulikunitz/xz v0.5.16 h1:ld6NyySjx5lowVKwJvMRLnW5nxKX/xnpSiFYZ/Lxur0=

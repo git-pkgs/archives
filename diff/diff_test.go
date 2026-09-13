@@ -86,11 +86,28 @@ func TestCompare(t *testing.T) {
 	// Check deleted file
 	if f, ok := fileMap["deleted.txt"]; !ok || f.Type != TypeDeleted {
 		t.Error("deleted.txt should be marked as deleted")
+	} else if f.LinesDeleted != 1 {
+		t.Errorf("deleted.txt LinesDeleted = %d, want 1", f.LinesDeleted)
 	}
 
 	// Check added file
 	if f, ok := fileMap["added.txt"]; !ok || f.Type != TypeAdded {
 		t.Error("added.txt should be marked as added")
+	} else if f.LinesAdded != 1 {
+		t.Errorf("added.txt LinesAdded = %d, want 1", f.LinesAdded)
+	}
+
+	// Totals include added and deleted files as well as modified hunks.
+	var wantAdded, wantDeleted int
+	for _, f := range result.Files {
+		wantAdded += f.LinesAdded
+		wantDeleted += f.LinesDeleted
+	}
+	if result.TotalAdded != wantAdded {
+		t.Errorf("TotalAdded = %d, want sum of per-file %d", result.TotalAdded, wantAdded)
+	}
+	if result.TotalDeleted != wantDeleted {
+		t.Errorf("TotalDeleted = %d, want sum of per-file %d", result.TotalDeleted, wantDeleted)
 	}
 
 	// Check modified files
@@ -195,6 +212,8 @@ func TestCountLines(t *testing.T) {
 		{"one line", []byte("hello"), 1},
 		{"three lines", []byte("line1\nline2\nline3"), 3},
 		{"trailing newline", []byte("line1\nline2\n"), 2},
+		{"only newline", []byte("\n"), 1},
+		{"long line", append(bytes.Repeat([]byte{'x'}, 100_000), '\n', 'y'), 2},
 	}
 
 	for _, tt := range tests {
@@ -204,6 +223,26 @@ func TestCountLines(t *testing.T) {
 				t.Errorf("countLines() = %d, want %d", got, tt.expected)
 			}
 		})
+	}
+}
+
+func BenchmarkGenerateAddedDiff(b *testing.B) {
+	content := bytes.Repeat([]byte("the quick brown fox jumps over the lazy dog\n"), 10_000)
+	b.SetBytes(int64(len(content)))
+	b.ReportAllocs()
+	for b.Loop() {
+		_ = generateAddedDiff("bench.txt", content)
+	}
+}
+
+func BenchmarkGenerateSimpleDiff(b *testing.B) {
+	line := []byte("the quick brown fox jumps over the lazy dog\n")
+	oldContent := bytes.Repeat(line, 5000)
+	newContent := append(bytes.Repeat(line, 2500), bytes.Repeat([]byte("THE QUICK BROWN FOX\n"), 2500)...)
+	b.SetBytes(int64(len(oldContent) + len(newContent)))
+	b.ReportAllocs()
+	for b.Loop() {
+		_, _, _ = generateSimpleDiff("bench.txt", oldContent, newContent)
 	}
 }
 

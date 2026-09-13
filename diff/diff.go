@@ -2,7 +2,6 @@
 package diff
 
 import (
-	"bufio"
 	"bytes"
 	"fmt"
 	"io"
@@ -107,9 +106,9 @@ func Compare(oldReader, newReader archives.Reader) (*CompareResult, error) {
 			result.FilesAdded++
 		case TypeModified:
 			result.FilesChanged++
-			result.TotalAdded += fileDiff.LinesAdded
-			result.TotalDeleted += fileDiff.LinesDeleted
 		}
+		result.TotalAdded += fileDiff.LinesAdded
+		result.TotalDeleted += fileDiff.LinesDeleted
 
 		result.Files = append(result.Files, fileDiff)
 	}
@@ -125,7 +124,15 @@ func compareFile(path string, oldInfo, newInfo archives.FileInfo, oldReader, new
 
 	switch {
 	case inOld && !inNew:
-		return FileDiff{Path: path, Type: TypeDeleted}, true
+		fd := FileDiff{Path: path, Type: TypeDeleted}
+		if content, err := readFileContent(oldReader, path); err == nil {
+			if !isDiffableText(content) {
+				fd.IsBinary = true
+			} else {
+				fd.LinesDeleted = countLines(content)
+			}
+		}
+		return fd, true
 
 	case !inOld && inNew:
 		fd := FileDiff{Path: path, Type: TypeAdded}
@@ -248,25 +255,25 @@ func generateSimpleDiff(path string, oldContent, newContent []byte) (string, int
 
 	// Context before
 	for i := hunkOldStart; i < oldStart && i < len(oldLines); i++ {
-		hunk.WriteString(" " + oldLines[i] + "\n")
+		writeDiffLine(&hunk, ' ', oldLines[i])
 	}
 
 	// Deleted lines
 	for i := oldStart; i < oldStart+oldCount && i < len(oldLines); i++ {
-		hunk.WriteString("-" + oldLines[i] + "\n")
+		writeDiffLine(&hunk, '-', oldLines[i])
 		linesDeleted++
 	}
 
 	// Added lines
 	for i := newStart; i < newStart+newCount && i < len(newLines); i++ {
-		hunk.WriteString("+" + newLines[i] + "\n")
+		writeDiffLine(&hunk, '+', newLines[i])
 		linesAdded++
 	}
 
 	// Context after
 	afterStart := oldStart + oldCount
 	for i := 0; i < contextAfter && afterStart+i < len(oldLines); i++ {
-		hunk.WriteString(" " + oldLines[afterStart+i] + "\n")
+		writeDiffLine(&hunk, ' ', oldLines[afterStart+i])
 	}
 
 	// Calculate hunk size
@@ -291,10 +298,18 @@ func generateAddedDiff(path string, content []byte) string {
 	fmt.Fprintf(&buf, "@@ -0,0 +1,%d @@\n", len(lines))
 
 	for _, line := range lines {
-		buf.WriteString("+" + string(line) + "\n")
+		buf.WriteByte('+')
+		buf.Write(line)
+		buf.WriteByte('\n')
 	}
 
 	return buf.String()
+}
+
+func writeDiffLine(b *strings.Builder, prefix byte, line string) {
+	b.WriteByte(prefix)
+	b.WriteString(line)
+	b.WriteByte('\n')
 }
 
 var diffPathReplacer = strings.NewReplacer("\n", "", "\r", "")
@@ -303,12 +318,16 @@ func sanitizeDiffPath(path string) string {
 	return diffPathReplacer.Replace(path)
 }
 
-// countLines counts the number of lines in content.
+// countLines counts the number of lines in content. bufio.Scanner is not
+// used here because it silently stops on any line longer than 64 KiB
+// (minified JS, source maps) and returns a short count.
 func countLines(content []byte) int {
-	scanner := bufio.NewScanner(bytes.NewReader(content))
-	count := 0
-	for scanner.Scan() {
-		count++
+	if len(content) == 0 {
+		return 0
 	}
-	return count
+	n := bytes.Count(content, []byte{'\n'})
+	if content[len(content)-1] != '\n' {
+		n++
+	}
+	return n
 }

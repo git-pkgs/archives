@@ -178,6 +178,35 @@ func TestTarTruncatedPayload(t *testing.T) {
 	}
 }
 
+func TestTarGzipMultistream(t *testing.T) {
+	// Alpine .apk packages are concatenated gzip members with the tar
+	// stream spanning the boundary; the reader must transparently continue
+	// into the next member.
+	raw := tarWithPayloads(t, []byte("aaa"), []byte("bbbb"))
+	split := 1024 // after first header + 512-byte padded payload
+	data := append(gzipTar(t, raw[:split]), gzipTar(t, raw[split:])...)
+	r, err := OpenBytes("alpine.apk", data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = r.Close() }()
+	files, err := r.List()
+	if err != nil || len(files) != 2 {
+		t.Fatalf("List = %d entries, %v", len(files), err)
+	}
+	assertTarPayload(t, r, "package/lib/file0", []byte("aaa"))
+	assertTarPayload(t, r, "package/lib/file1", []byte("bbbb"))
+}
+
+func TestTarGzipHeaderError(t *testing.T) {
+	data := gzipTar(t, tarWithPayloads(t, []byte("x")))
+	data[0] = 0 // clobber gzip magic
+	_, err := OpenBytes("test.tar.gz", data)
+	if !errors.Is(err, gzip.ErrHeader) {
+		t.Fatalf("got %v, want gzip header error", err)
+	}
+}
+
 func TestTarPayloadLimitBoundary(t *testing.T) {
 	oldMax := maxDecompressedSize
 	maxDecompressedSize = 1024

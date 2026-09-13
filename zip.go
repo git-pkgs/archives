@@ -176,7 +176,11 @@ func (z *zipReader) ListDir(dirPath string) ([]FileInfo, error) {
 		// Check if this file/dir is directly in the requested directory
 		if isInDir(path, dirPath) {
 			if f.FileInfo().IsDir() {
-				seenDirs[path] = true
+				name := strings.TrimSuffix(strings.TrimPrefix(path, dirPath), "/")
+				if seenDirs[name] {
+					continue
+				}
+				seenDirs[name] = true
 			}
 			files = append(files, fileInfoFromZip(f))
 			continue
@@ -184,16 +188,14 @@ func (z *zipReader) ListDir(dirPath string) ([]FileInfo, error) {
 
 		// Check if we should add a subdirectory entry
 		if dirPath == "" || strings.HasPrefix(path, dirPath) {
-			rel := strings.TrimPrefix(path, dirPath)
-			parts := strings.Split(strings.TrimSuffix(rel, "/"), "/")
-			if len(parts) > 1 {
-				// This file is in a subdirectory
-				subdir := dirPath + parts[0] + "/"
-				if !seenDirs[subdir] {
-					seenDirs[subdir] = true
+			rel := strings.TrimSuffix(strings.TrimPrefix(path, dirPath), "/")
+			if i := strings.IndexByte(rel, '/'); i >= 0 {
+				name := rel[:i]
+				if !seenDirs[name] {
+					seenDirs[name] = true
 					files = append(files, FileInfo{
-						Path:  subdir,
-						Name:  parts[0],
+						Path:  dirPath + name + "/",
+						Name:  name,
 						IsDir: true,
 					})
 				}

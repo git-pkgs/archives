@@ -1,6 +1,8 @@
 package archives
 
 import (
+	"archive/tar"
+	"bytes"
 	"fmt"
 	"io"
 	"testing"
@@ -17,6 +19,39 @@ func BenchmarkTarBrowse(b *testing.B) {
 				benchmarkTarBrowse(b, filename, payload)
 			})
 		}
+	}
+}
+
+func BenchmarkListDir(b *testing.B) {
+	const (
+		files    = 2000
+		subdirs  = 20
+		filePerm = 0o644
+	)
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	for i := range files {
+		_ = tw.WriteHeader(&tar.Header{
+			Name: fmt.Sprintf("package/lib/sub%02d/file%04d.dat", i%subdirs, i),
+			Mode: filePerm,
+		})
+	}
+	_ = tw.Close()
+	r, err := OpenBytesWithPrefix("test.tar", buf.Bytes(), "package/")
+	if err != nil {
+		b.Fatal(err)
+	}
+	b.Cleanup(func() { _ = r.Close() })
+
+	for _, dir := range []string{"", "lib", "lib/sub00"} {
+		b.Run(dir, func(b *testing.B) {
+			b.ReportAllocs()
+			for b.Loop() {
+				if _, err := r.ListDir(dir); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
 	}
 }
 

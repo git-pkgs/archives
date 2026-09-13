@@ -252,29 +252,23 @@ func normalizeDir(dirPath string) string {
 	return dirPath + "/"
 }
 
-// isInDir checks if filePath is directly in dirPath (not in subdirectories).
+// isInDir reports whether filePath is directly in dirPath (not in a
+// subdirectory). dirPath must already be normalized via normalizeDir;
+// callers do this once outside the per-entry loop.
 func isInDir(filePath, dirPath string) bool {
-	dirPath = normalizeDir(dirPath)
-
-	// Normalize file path by trimming trailing slash
 	filePath = strings.TrimSuffix(filePath, "/")
 
-	// Root directory
 	if dirPath == "" {
-		// File is in root if it has no slashes
-		parts := strings.Split(filePath, "/")
-		return len(parts) == 1
+		return strings.IndexByte(filePath, '/') < 0
 	}
 
-	// Check if file starts with directory path
-	if !strings.HasPrefix(filePath+"/", dirPath) {
+	// dirPath ends in "/"; an entry naming the directory itself counts as
+	// inside it so explicit dir entries in the archive are listed.
+	if filePath == dirPath[:len(dirPath)-1] {
+		return true
+	}
+	if !strings.HasPrefix(filePath, dirPath) {
 		return false
 	}
-
-	// Get relative path
-	rel := strings.TrimPrefix(filePath, strings.TrimSuffix(dirPath, "/"))
-	rel = strings.TrimPrefix(rel, "/")
-
-	// Should have no more slashes
-	return !strings.Contains(rel, "/")
+	return strings.IndexByte(filePath[len(dirPath):], '/') < 0
 }

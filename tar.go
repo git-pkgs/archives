@@ -178,15 +178,14 @@ func (t *tarReader) ListDir(dirPath string) ([]FileInfo, error) {
 
 		// Check if we should add a subdirectory entry
 		if dirPath == "" || strings.HasPrefix(path, dirPath) {
-			rel := strings.TrimPrefix(path, dirPath)
-			parts := strings.Split(strings.TrimSuffix(rel, "/"), "/")
-			if len(parts) > 1 {
-				subdir := dirPath + parts[0] + "/"
+			rel := strings.TrimSuffix(strings.TrimPrefix(path, dirPath), "/")
+			if i := strings.IndexByte(rel, '/'); i >= 0 {
+				subdir := dirPath + rel[:i] + "/"
 				if !seenDirs[subdir] {
 					seenDirs[subdir] = true
 					files = append(files, FileInfo{
 						Path:  subdir,
-						Name:  parts[0],
+						Name:  rel[:i],
 						IsDir: true,
 					})
 				}

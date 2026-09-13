@@ -85,11 +85,13 @@ func TestIsInDir(t *testing.T) {
 	}{
 		{"file.txt", "", true},
 		{"dir/file.txt", "", false},
-		{"dir/file.txt", "dir", true},
-		{"dir/subdir/file.txt", "dir", false},
-		{"dir/subdir/file.txt", "dir/subdir", true},
-		{"other/file.txt", "dir", false},
-		{"dir/", "", true}, // dir entry is in root
+		{"dir/file.txt", "dir/", true},
+		{"dir/subdir/file.txt", "dir/", false},
+		{"dir/subdir/file.txt", "dir/subdir/", true},
+		{"other/file.txt", "dir/", false},
+		{"dir/", "", true},        // dir entry is in root
+		{"dir/", "dir/", true},    // explicit entry for the directory itself
+		{"dirX/file", "dir/", false},
 	}
 
 	for _, tt := range tests {

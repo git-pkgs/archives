@@ -722,6 +722,34 @@ func TestTarListDirNoDuplicatesWithExplicitDirEntries(t *testing.T) {
 	assertNoDuplicates(t, "ListDir project-abc123/", files)
 }
 
+func TestListDirNoDuplicatesWithLateDirEntry(t *testing.T) {
+	// Some archives (hand-built or from tools that append a manifest
+	// pass) emit files before the explicit entry for their parent
+	// directory. ListDir synthesises a subdir entry on the first file
+	// and must then skip the explicit one.
+	buf := new(bytes.Buffer)
+	tw := tar.NewWriter(buf)
+	_ = tw.WriteHeader(&tar.Header{Name: "pkg/src/main.go", Mode: 0o644, Size: 1})
+	_, _ = tw.Write([]byte("x"))
+	_ = tw.WriteHeader(&tar.Header{Name: "pkg/src/", Typeflag: tar.TypeDir, Mode: 0o755})
+	_ = tw.Close()
+
+	reader, err := openTar(buf.Bytes(), "")
+	if err != nil {
+		t.Fatalf("openTar failed: %v", err)
+	}
+	defer func() { _ = reader.Close() }()
+
+	files, err := reader.ListDir("pkg/")
+	if err != nil {
+		t.Fatalf("ListDir failed: %v", err)
+	}
+	assertNoDuplicates(t, "ListDir pkg/", files)
+	if len(files) != 1 || files[0].Path != "pkg/src/" || !files[0].IsDir {
+		t.Errorf("ListDir pkg/ = %+v, want single pkg/src/ dir", files)
+	}
+}
+
 func TestGetStripPrefixNpm(t *testing.T) {
 	// Create npm-style archive
 	buf := new(bytes.Buffer)

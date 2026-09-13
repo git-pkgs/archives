@@ -23,6 +23,8 @@ var (
 var ErrDecompressLimit = errors.New("decompressed content exceeds size limit")
 var ErrEntryLimit = errors.New("archive entry count exceeds limit")
 
+const maxInitialEntryBuffer = 64 << 10
+
 type tarReader struct {
 	raw   []byte
 	files []tarFileEntry
@@ -104,7 +106,7 @@ func openTarWithInitialEntryCount(raw []byte, compression string, initialEntryCo
 		var data []byte
 		if !info.IsDir {
 			remaining := maxDecompressedSize - totalSize
-			data, err = io.ReadAll(io.LimitReader(tr, remaining+1))
+			data, err = readTarEntry(tr, header.Size, remaining)
 			if err != nil {
 				return nil, fmt.Errorf("reading file %s: %w", header.Name, err)
 			}
@@ -128,6 +130,18 @@ func openTarWithInitialEntryCount(raw []byte, compression string, initialEntryCo
 	}
 
 	return &tarReader{raw: raw, files: files, index: index}, nil
+}
+
+func readTarEntry(r io.Reader, size, remaining int64) ([]byte, error) {
+	limited := io.LimitReader(r, remaining+1)
+	if size <= bytes.MinRead || size > maxInitialEntryBuffer {
+		return io.ReadAll(limited)
+	}
+	var buf bytes.Buffer
+	// Bound the hint from untrusted headers and leave room for the EOF read.
+	buf.Grow(int(min(size, remaining)) + bytes.MinRead)
+	_, err := buf.ReadFrom(limited)
+	return buf.Bytes(), err
 }
 
 func checkArchiveEntryCount(count int) error {

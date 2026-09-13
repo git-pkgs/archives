@@ -9,7 +9,6 @@ import (
 	"io"
 	"path/filepath"
 	"reflect"
-	"strings"
 	"testing"
 
 	"github.com/klauspost/compress/zstd"
@@ -170,11 +169,7 @@ func TestTarTruncatedPayload(t *testing.T) {
 				t.Fatal(err)
 			}
 			for _, filename := range []string{"test.tar", "test.tar.gz"} {
-				data := buf.Bytes()
-				if strings.HasSuffix(filename, ".gz") {
-					data = gzipTar(t, data)
-				}
-				_, err := OpenBytes(filename, data)
+				_, err := OpenBytes(filename, compressTar(t, filename, buf.Bytes()))
 				if !errors.Is(err, io.ErrUnexpectedEOF) {
 					t.Fatalf("%s: got %v, want unexpected EOF", filename, err)
 				}

@@ -2,11 +2,15 @@ package archives
 
 import (
 	"archive/zip"
+	"bufio"
 	"bytes"
 	"encoding/binary"
 	"fmt"
 	"io"
 	"strings"
+	"sync"
+
+	"github.com/klauspost/compress/flate"
 )
 
 // zipUnixModeShift is the bit offset of the Unix st_mode field within a
@@ -48,6 +52,7 @@ func openZip(raw []byte) (*zipReader, error) {
 	if err != nil {
 		return nil, fmt.Errorf("opening zip: %w", err)
 	}
+	reader.RegisterDecompressor(zip.Deflate, newFlateReader)
 	if err := checkArchiveEntryCount(len(reader.File)); err != nil {
 		return nil, err
 	}
@@ -241,6 +246,49 @@ func zipHasUnixMode(h *zip.FileHeader) bool {
 	default:
 		return false
 	}
+}
+
+// RegisterDecompressor bypasses archive/zip's internal flate reader pool,
+// so pool klauspost readers here. archive/zip hands the decompressor an
+// io.SectionReader with no ReadByte, which klauspost's Reset would wrap in
+// a fresh bufio.Reader on every call; pooling one alongside the decoder and
+// passing it to Reset avoids that and hits klauspost's *bufio.Reader fast
+// path.
+var flateReaderPool sync.Pool
+
+type flateState struct {
+	br *bufio.Reader
+	fr io.ReadCloser
+}
+
+type pooledFlateReader struct {
+	s *flateState
+}
+
+func newFlateReader(r io.Reader) io.ReadCloser {
+	s, _ := flateReaderPool.Get().(*flateState)
+	if s == nil {
+		br := bufio.NewReader(r)
+		return &pooledFlateReader{s: &flateState{br: br, fr: flate.NewReader(br)}}
+	}
+	s.br.Reset(r)
+	_ = s.fr.(flate.Resetter).Reset(s.br, nil)
+	return &pooledFlateReader{s: s}
+}
+
+func (p *pooledFlateReader) Read(b []byte) (int, error) {
+	return p.s.fr.Read(b)
+}
+
+func (p *pooledFlateReader) Close() error {
+	if p.s == nil {
+		return nil
+	}
+	err := p.s.fr.Close()
+	p.s.br.Reset(nil)
+	flateReaderPool.Put(p.s)
+	p.s = nil
+	return err
 }
 
 func extractName(path string) string {

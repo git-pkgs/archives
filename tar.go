@@ -4,13 +4,13 @@ import (
 	"archive/tar"
 	"bytes"
 	"compress/bzip2"
-	"compress/gzip"
 	"errors"
 	"fmt"
 	"io"
 	"io/fs"
 	"strings"
 
+	"github.com/klauspost/compress/gzip"
 	"github.com/klauspost/compress/zstd"
 	"github.com/ulikunitz/xz"
 )

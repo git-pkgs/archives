@@ -38,7 +38,7 @@ func openConda(raw []byte) (*tarReader, error) {
 		if !strings.HasPrefix(f.Name, "pkg-") && !strings.HasPrefix(f.Name, "info-") {
 			continue
 		}
-		entries, size, err := readCondaMember(f, len(files))
+		entries, size, err := readCondaMember(raw, f, len(files))
 		if err != nil {
 			return nil, err
 		}
@@ -62,19 +62,10 @@ func openConda(raw []byte) (*tarReader, error) {
 	return &tarReader{raw: raw, files: files, index: index}, nil
 }
 
-func readCondaMember(f *zip.File, initialEntryCount int) ([]tarFileEntry, int64, error) {
-	rc, err := f.Open()
+func readCondaMember(raw []byte, f *zip.File, initialEntryCount int) ([]tarFileEntry, int64, error) {
+	data, err := condaMemberBytes(raw, f)
 	if err != nil {
-		return nil, 0, fmt.Errorf("opening %s: %w", f.Name, err)
-	}
-	defer func() { _ = rc.Close() }()
-
-	data, err := io.ReadAll(io.LimitReader(rc, maxDecompressedSize+1))
-	if err != nil {
-		return nil, 0, fmt.Errorf("reading %s: %w", f.Name, err)
-	}
-	if int64(len(data)) > maxDecompressedSize {
-		return nil, 0, fmt.Errorf("%w: %s exceeds %d bytes", ErrDecompressLimit, f.Name, maxDecompressedSize)
+		return nil, 0, err
 	}
 
 	tr, err := openTarWithInitialEntryCount(data, "zstd", initialEntryCount)
@@ -86,4 +77,34 @@ func readCondaMember(f *zip.File, initialEntryCount int) ([]tarFileEntry, int64,
 		size += int64(len(e.data))
 	}
 	return tr.files, size, nil
+}
+
+// condaMemberBytes returns the raw bytes of a .conda zip member. Real
+// .conda packages store members uncompressed (zip.Store), so DataOffset
+// locates the payload inside raw and a slice returns it with no copy or
+// buffer growth. This bypasses archive/zip's CRC32 check on the member;
+// the inner zstd frame check catches corruption anyway. Non-Store members
+// or out-of-range headers fall through to the original Open+ReadAll path.
+func condaMemberBytes(raw []byte, f *zip.File) ([]byte, error) {
+	if f.Method == zip.Store {
+		size := f.CompressedSize64
+		if off, err := f.DataOffset(); err == nil &&
+			off >= 0 && size <= uint64(len(raw)) && off <= int64(len(raw))-int64(size) {
+			return raw[off : off+int64(size)], nil
+		}
+	}
+
+	rc, err := f.Open()
+	if err != nil {
+		return nil, fmt.Errorf("opening %s: %w", f.Name, err)
+	}
+	defer func() { _ = rc.Close() }()
+	data, err := io.ReadAll(io.LimitReader(rc, maxDecompressedSize+1))
+	if err != nil {
+		return nil, fmt.Errorf("reading %s: %w", f.Name, err)
+	}
+	if int64(len(data)) > maxDecompressedSize {
+		return nil, fmt.Errorf("%w: %s exceeds %d bytes", ErrDecompressLimit, f.Name, maxDecompressedSize)
+	}
+	return data, nil
 }

@@ -6,13 +6,14 @@ import (
 	"bytes"
 	"errors"
 	"io"
+	"math/rand"
 	"strings"
 	"testing"
 
 	"github.com/klauspost/compress/zstd"
 )
 
-func writeTarZst(t *testing.T, files map[string]string) []byte {
+func writeTarZst(t testing.TB, files map[string]string) []byte {
 	t.Helper()
 	var buf bytes.Buffer
 	enc, err := zstd.NewWriter(&buf)
@@ -235,6 +236,101 @@ func TestOpenCondaStopsAtCombinedEntryLimit(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "count 3 exceeds 2") {
 		t.Fatalf("expected combined entry count in error, got: %v", err)
+	}
+}
+
+func TestCondaDeflatedMemberFallback(t *testing.T) {
+	// Real .conda packages use zip.Store, but a hand-built or repacked
+	// one might not. The reader must still open it via f.Open().
+	pkg := writeTarZst(t, map[string]string{"lib/x.so": "content"})
+	info := writeTarZst(t, map[string]string{"info/index.json": `{"name":"x"}`})
+
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	for _, m := range []struct {
+		name string
+		data []byte
+	}{
+		{"pkg-x-1.tar.zst", pkg},
+		{"info-x-1.tar.zst", info},
+	} {
+		w, err := zw.CreateHeader(&zip.FileHeader{Name: m.name, Method: zip.Deflate})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := w.Write(m.data); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	reader, err := openConda(buf.Bytes())
+	if err != nil {
+		t.Fatalf("openConda deflated: %v", err)
+	}
+	defer func() { _ = reader.Close() }()
+
+	rc, err := reader.Extract("lib/x.so")
+	if err != nil {
+		t.Fatalf("Extract: %v", err)
+	}
+	content, _ := io.ReadAll(rc)
+	_ = rc.Close()
+	if string(content) != "content" {
+		t.Errorf("content = %q", string(content))
+	}
+}
+
+// createBenchConda builds a .conda whose pkg member is filled with
+// random bytes so the stored .tar.zst is close to memberSize and the
+// zero-copy path has real work to avoid.
+func createBenchConda(b *testing.B, memberSize int) []byte {
+	b.Helper()
+	rnd := rand.New(rand.NewSource(1)) //nolint:gosec
+	blob := make([]byte, memberSize)
+	rnd.Read(blob)
+
+	var pkg bytes.Buffer
+	enc, err := zstd.NewWriter(&pkg)
+	if err != nil {
+		b.Fatal(err)
+	}
+	tw := tar.NewWriter(enc)
+	_ = tw.WriteHeader(&tar.Header{Name: "lib/blob", Size: int64(len(blob)), Mode: 0o644})
+	_, _ = tw.Write(blob)
+	_ = tw.Close()
+	_ = enc.Close()
+
+	info := writeTarZst(b, map[string]string{"info/index.json": `{"name":"bench"}`})
+
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	for _, m := range []struct {
+		name string
+		data []byte
+	}{
+		{"pkg-bench-1.tar.zst", pkg.Bytes()},
+		{"info-bench-1.tar.zst", info},
+	} {
+		w, _ := zw.CreateHeader(&zip.FileHeader{Name: m.name, Method: zip.Store})
+		_, _ = w.Write(m.data)
+	}
+	_ = zw.Close()
+	return buf.Bytes()
+}
+
+func BenchmarkOpenConda(b *testing.B) {
+	raw := createBenchConda(b, 8<<20)
+	b.SetBytes(int64(len(raw)))
+	b.ReportAllocs()
+	for b.Loop() {
+		r, err := openConda(raw)
+		if err != nil {
+			b.Fatal(err)
+		}
+		_ = r.Close()
 	}
 }
 

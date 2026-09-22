@@ -81,6 +81,35 @@ reader, _ := archives.OpenWithPrefix("pkg.tgz", f, "package/")
 // files are now accessible without the package/ prefix
 ```
 
+### Using io/fs
+
+`NewFS` adapts a reader to `fs.FS`, with `ReadDir`, `ReadFile`, and `Stat` support. It indexes metadata once and reads file contents through the reader as needed.
+
+```go
+archiveFS, err := archives.NewFS(reader)
+if err != nil {
+    return err
+}
+data, err := fs.ReadFile(archiveFS, "lib/util.js")
+if err != nil {
+    return err
+}
+fmt.Println(string(data))
+if err := fs.WalkDir(archiveFS, ".", func(name string, entry fs.DirEntry, err error) error {
+    if err != nil {
+        return err
+    }
+    fmt.Println(name)
+    return nil
+}); err != nil {
+    return err
+}
+```
+
+Import `io/fs` for these functions. Paths use `/` separators and `"."` for the root, and missing parent directories appear automatically. Archive names may have leading `./` or directory trailing slashes; other invalid paths and file/directory conflicts cause `NewFS` to return `fs.ErrInvalid`. Duplicate paths use the first entry. Symlinks and other special entries appear in listings but cannot be opened.
+
+Keep the reader open while using the filesystem. Closing an individual file leaves the reader open.
+
 ### Extracting to disk
 
 `ExtractAll` writes every entry under a target directory, creating it and any intermediate directories. Entry names are validated with `filepath.Localize` so absolute paths and `..` segments that would escape the target return `ErrUnsafePath` naming the offending entry.

@@ -153,4 +153,4 @@ Filenames without a recognised extension are opened by inspecting the first byte
 
 ## License
 
-MIT
+[MIT](LICENSE).

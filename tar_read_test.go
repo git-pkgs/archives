@@ -91,7 +91,9 @@ func TestTarPayloadSizes(t *testing.T) {
 				t.Fatalf("Hash = %q, %v", gotHash, err)
 			}
 			dir := t.TempDir()
-			if err := ExtractAll(r, dir); err != nil {
+			if err := ExtractAll(r, dir); errors.Is(err, errors.ErrUnsupported) {
+				t.Skip("disk extraction is unavailable on this target")
+			} else if err != nil {
 				t.Fatal(err)
 			}
 			for i, payload := range payloads {
@@ -154,7 +156,9 @@ func TestTarDuplicatePayloads(t *testing.T) {
 	}
 	assertTarPayload(t, r, "index.js", []byte("first"))
 	dir := t.TempDir()
-	if err := ExtractAll(r, dir); err != nil {
+	if err := ExtractAll(r, dir); errors.Is(err, errors.ErrUnsupported) {
+		t.Skip("disk extraction is unavailable on this target")
+	} else if err != nil {
 		t.Fatal(err)
 	}
 	assertFileContent(t, filepath.Join(dir, "index.js"), "first")

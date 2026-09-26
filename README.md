@@ -125,6 +125,8 @@ if err := archives.ExtractAll(reader, dir); err != nil {
 
 File permissions are preserved where the archive records them. Entries that the format marks as symlinks or other non-regular types are skipped.
 
+Under TinyGo, `ExtractAll` returns an error matching `errors.ErrUnsupported` because `os.Root` is unavailable. In-memory reading through `Reader.Extract` remains available.
+
 ### Comparing versions
 
 The `diff` subpackage compares two archives and produces unified diffs. It classifies each file as added, deleted, modified, or binary, and includes line-level diff output for text files.

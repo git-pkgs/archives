@@ -68,7 +68,7 @@ func readCondaMember(raw []byte, f *zip.File, initialEntryCount int) ([]tarFileE
 		return nil, 0, err
 	}
 
-	tr, err := openTarWithInitialEntryCount(data, "zstd", initialEntryCount)
+	tr, err := openTarWithInitialEntryCount(data, compressionZstd, initialEntryCount)
 	if err != nil {
 		return nil, 0, fmt.Errorf("opening %s: %w", f.Name, err)
 	}

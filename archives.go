@@ -36,6 +36,10 @@ const (
 	formatGem        = "gem"
 	formatConda      = "conda"
 	contentSniffSize = 512
+	compressionGzip  = "gzip"
+	compressionBzip2 = "bzip2"
+	compressionXZ    = "xz"
+	compressionZstd  = "zstd"
 )
 
 // FileInfo represents metadata about a file in an archive.
@@ -128,13 +132,13 @@ func openRaw(format string, raw []byte) (Reader, error) {
 	case formatTAR:
 		return openTar(raw, "")
 	case formatTarGzip, formatTGZ:
-		return openTar(raw, "gzip")
+		return openTar(raw, compressionGzip)
 	case formatTarBzip2:
-		return openTar(raw, "bzip2")
+		return openTar(raw, compressionBzip2)
 	case formatTarXZ:
-		return openTar(raw, "xz")
+		return openTar(raw, compressionXZ)
 	case formatTarZstd:
-		return openTar(raw, "zstd")
+		return openTar(raw, compressionZstd)
 	case formatGem:
 		return openGem(raw)
 	case formatConda:
@@ -158,13 +162,13 @@ func archiveFormat(detected string) string {
 		return formatZIP
 	case "tar":
 		return formatTAR
-	case "gzip":
+	case compressionGzip:
 		return formatTarGzip
-	case "bzip2":
+	case compressionBzip2:
 		return formatTarBzip2
-	case "xz":
+	case compressionXZ:
 		return formatTarXZ
-	case "zstd":
+	case compressionZstd:
 		return formatTarZstd
 	default:
 		return ""

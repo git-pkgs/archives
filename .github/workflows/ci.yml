@@ -11,6 +11,8 @@ permissions: {}
 jobs:
   test:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -68,14 +70,22 @@ jobs:
           tar -xJf wasmtime.tar.xz
           echo "$RUNNER_TEMP/wasmtime-v44.0.1-x86_64-linux" >> "$GITHUB_PATH"
 
+      - name: Test Go WebAssembly streaming
+        run: GOOS=js GOARCH=wasm go test -exec="$(go env GOROOT)/lib/wasm/go_js_wasm_exec" -run '^TestStream' .
+
       - name: Test TinyGo WebAssembly archive reading
-        run: tinygo test -target=wasm -run '^TestExtractAllUnsupported$' -v .
+        run: tinygo test -target=wasm -run '^Test(ExtractAllUnsupported|Stream)' -v .
 
       - name: Test TinyGo WASI archive reading
-        run: tinygo test -target=wasip1 -run '^TestExtractAllUnsupported$' -v .
+        run: tinygo test -target=wasip1 -run '^Test(ExtractAllUnsupported|Stream)' -v .
+
+      - name: Test Go WASI streaming
+        run: GOOS=wasip1 GOARCH=wasm go test -exec=wasmtime -run '^TestStream' .
 
   lint:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

@@ -43,7 +43,7 @@ func openGem(raw []byte) (*gemReader, error) {
 				return nil, fmt.Errorf("%w: data.tar.gz exceeds %d bytes", ErrDecompressLimit, maxDecompressedSize)
 			}
 
-			dataReader, err := openTar(dataContent, "gzip")
+			dataReader, err := openTar(dataContent, compressionGzip)
 			if err != nil {
 				return nil, fmt.Errorf("opening data.tar.gz: %w", err)
 			}

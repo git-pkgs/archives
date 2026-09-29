@@ -72,6 +72,10 @@ func openZip(raw []byte) (*zipReader, error) {
 }
 
 func checkZipEntryCount(raw []byte) error {
+	return checkZipEntryCountLimit(raw, maxArchiveEntries)
+}
+
+func checkZipEntryCountLimit(raw []byte, limit int) error {
 	start, end, ok := zipCentralDirectoryBounds(raw)
 	if !ok {
 		return nil
@@ -91,8 +95,8 @@ func checkZipEntryCount(raw []byte) error {
 		}
 
 		count++
-		if err := checkArchiveEntryCount(count); err != nil {
-			return err
+		if count > limit {
+			return fmt.Errorf("%w: count %d exceeds %d", ErrEntryLimit, count, limit)
 		}
 		offset += recordLen
 	}

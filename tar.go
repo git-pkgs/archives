@@ -41,32 +41,12 @@ func openTar(raw []byte, compression string) (*tarReader, error) {
 }
 
 func openTarWithInitialEntryCount(raw []byte, compression string, initialEntryCount int) (*tarReader, error) {
-	content := bytes.NewReader(raw)
-	r := io.Reader(content)
-
-	switch compression {
-	case "gzip":
-		gz, err := gzip.NewReader(content)
-		if err != nil {
-			return nil, fmt.Errorf("opening gzip: %w", err)
-		}
-		defer func() { _ = gz.Close() }()
-		r = gz
-	case "bzip2":
-		r = bzip2.NewReader(content)
-	case "xz":
-		xzReader, err := xz.NewReader(content)
-		if err != nil {
-			return nil, fmt.Errorf("opening xz: %w", err)
-		}
-		r = xzReader
-	case "zstd":
-		dec, err := zstd.NewReader(content, zstd.WithDecoderConcurrency(1))
-		if err != nil {
-			return nil, fmt.Errorf("opening zstd: %w", err)
-		}
-		defer dec.Close()
-		r = dec
+	r, closer, err := tarContentReader(bytes.NewReader(raw), compression)
+	if err != nil {
+		return nil, err
+	}
+	if closer != nil {
+		defer func() { _ = closer.Close() }()
 	}
 
 	tr := tar.NewReader(r)
@@ -85,23 +65,7 @@ func openTarWithInitialEntryCount(raw []byte, compression string, initialEntryCo
 			return nil, err
 		}
 
-		// FileInfo().Mode() combines header.Mode permission bits with type
-		// bits derived from Typeflag. It reports hard links as regular
-		// files, so mark them irregular explicitly since a hard-link entry
-		// carries no data of its own.
-		mode := header.FileInfo().Mode()
-		if header.Typeflag == tar.TypeLink {
-			mode |= fs.ModeIrregular
-		}
-		info := FileInfo{
-			Path:    header.Name,
-			Name:    extractName(header.Name),
-			Size:    header.Size,
-			ModTime: header.ModTime,
-			IsDir:   header.Typeflag == tar.TypeDir,
-			Mode:    uint32(mode),
-			HasMode: true,
-		}
+		info := fileInfoFromTar(header)
 
 		var data []byte
 		if !info.IsDir {
@@ -130,6 +94,46 @@ func openTarWithInitialEntryCount(raw []byte, compression string, initialEntryCo
 	}
 
 	return &tarReader{raw: raw, files: files, index: index}, nil
+}
+
+func fileInfoFromTar(header *tar.Header) FileInfo {
+	mode := header.FileInfo().Mode()
+	// Hard links have no body, despite FileInfo reporting a regular file.
+	if header.Typeflag == tar.TypeLink {
+		mode |= fs.ModeIrregular
+	}
+	return FileInfo{
+		Path: header.Name, Name: extractName(header.Name), Size: header.Size,
+		ModTime: header.ModTime, IsDir: header.Typeflag == tar.TypeDir,
+		Mode: uint32(mode), HasMode: true,
+	}
+}
+
+func tarContentReader(content io.Reader, compression string) (io.Reader, io.Closer, error) {
+	switch compression {
+	case compressionGzip:
+		gz, err := gzip.NewReader(content)
+		if err != nil {
+			return nil, nil, fmt.Errorf("opening gzip: %w", err)
+		}
+		return gz, gz, nil
+	case compressionBzip2:
+		return bzip2.NewReader(content), nil, nil
+	case compressionXZ:
+		r, err := xz.NewReader(content)
+		if err != nil {
+			return nil, nil, fmt.Errorf("opening xz: %w", err)
+		}
+		return r, nil, nil
+	case compressionZstd:
+		dec, err := zstd.NewReader(content, zstd.WithDecoderConcurrency(1))
+		if err != nil {
+			return nil, nil, fmt.Errorf("opening zstd: %w", err)
+		}
+		return dec, dec.IOReadCloser(), nil
+	default:
+		return content, nil, nil
+	}
 }
 
 func readTarEntry(r io.Reader, size, remaining int64) ([]byte, error) {

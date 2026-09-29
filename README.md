@@ -72,6 +72,68 @@ Compressed content is opened as TAR and returns a parser error when it does not
 contain a TAR archive. `Open` reads at most 512 bytes before rejecting an
 unsupported stream with no recognised extension.
 
+### Sequential reading
+
+`OpenStream` reads entries one at a time through `Next` and `Read`, without
+retaining expanded file bodies. It supports every format listed below,
+including the inner files of gem and conda packages.
+
+```go
+stream, err := archives.OpenStream("package.tgz", f, archives.StreamOptions{
+    MaxInputBytes:    64 << 20,
+    MaxEntryBytes:     8 << 20,
+    MaxExpandedBytes: 64 << 20,
+    MaxEntries:       2000,
+})
+if err != nil {
+    return err
+}
+defer stream.Close()
+
+for {
+    entry, err := stream.Next()
+    if err == io.EOF {
+        break
+    }
+    if err != nil {
+        return err
+    }
+    fmt.Println(entry.Path, entry.Size)
+    if _, err := io.Copy(io.Discard, stream); err != nil {
+        return err
+    }
+}
+```
+
+Import `io` for this example. `Next` discards unread entry data, and skipped
+entries still count towards the limits. Entries remain in archive order,
+including duplicates. Each entry's `Read` ends at `io.EOF`; iteration errors
+are terminal. The caller owns the input, and `Close` releases decoder resources
+without closing or draining it. A TAR end marker ends iteration, so trailing
+data and compression trailers beyond that marker may remain unchecked.
+
+ZIP and conda require random access to their compressed input. `OpenStream`
+buffers that input within `MaxInputBytes`; `OpenStreamBytes(name, data, options)`
+reuses an existing byte slice without copying it. Keep that slice unchanged
+until `Close`. TAR and gem can consume a forward-only input directly.
+
+Zero limits default to 512 MiB for each byte limit and 100,000 entries.
+Negative limits are rejected. Entry and expanded-byte limits use logical
+header sizes, including sparse files, before exposing a body. Container members
+in gem and conda have a separate entry-count budget, with their combined bodies
+bounded by `MaxInputBytes`. Decoder workspace and metadata are additional memory;
+these limits do not cap total heap usage. For forward-only input, the input
+limit covers bytes consumed, with at most one extra byte read to detect overflow.
+
+For `swhid-go`, regular files can go directly to
+`objects.ComputeContentHashReader(stream, entry.Size)`. This preserves its
+collision-detecting hash without buffering a file. `StreamEntry` includes the
+mode bits, `Linkname`, and `IsHardlink`: TAR symlink targets are in `Linkname`,
+while ZIP symlink targets are in the body. A directory-hashing consumer must
+retain paths, modes, and content hashes, resolve hard links, and apply its own
+duplicate-path policy. The stream cannot rewind to hash the whole artifact;
+hash the original byte slice or use a tee on the input and consume it fully.
+
 ### Prefix stripping
 
 Some package formats wrap content in a directory (npm uses `package/`). `OpenWithPrefix` strips a path prefix from all entries:

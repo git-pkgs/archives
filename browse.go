@@ -1,6 +1,7 @@
 package archives
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -25,6 +26,7 @@ type BrowseOptions struct {
 // expanded bodies. Finish and close each extracted file before the next call.
 // A Browser is not safe for concurrent use.
 type Browser struct {
+	ctx      context.Context
 	filename string
 	options  BrowseOptions
 	reopen   func() (io.ReadCloser, error)
@@ -38,16 +40,26 @@ type Browser struct {
 // ZIP and conda input is buffered once and reused without calling reopen.
 // A nil reopen is allowed, but a second sequential pass wraps errors.ErrUnsupported.
 func OpenBrowser(filename string, content io.Reader, reopen func() (io.ReadCloser, error), options BrowseOptions) (*Browser, error) {
+	return OpenBrowserContext(context.Background(), filename, content, reopen, options)
+}
+
+// OpenBrowserContext is OpenBrowser with cancellation across every pass,
+// including decompression of buffered input. The reopen callback must honor ctx
+// itself if opening can block. Canceling does not close the caller's input.
+func OpenBrowserContext(ctx context.Context, filename string, content io.Reader, reopen func() (io.ReadCloser, error), options BrowseOptions) (*Browser, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	limits, err := options.Limits.defaults()
 	if err != nil {
 		return nil, err
 	}
 	options.Limits = limits
-	format, content, err := streamFormat(filename, &streamInput{reader: content, remaining: limits.MaxInputBytes})
+	format, content, err := streamFormat(filename, &streamInput{reader: contextReader{ctx: ctx, reader: content}, remaining: limits.MaxInputBytes})
 	if err != nil {
 		return nil, err
 	}
-	b := &Browser{filename: filename, options: options, reopen: reopen}
+	b := &Browser{ctx: ctx, filename: filename, options: options, reopen: reopen}
 	if format != formatZIP && format != formatConda {
 		b.first = content
 		return b, nil
@@ -60,8 +72,11 @@ func OpenBrowser(filename string, content io.Reader, reopen func() (io.ReadClose
 }
 
 func (b *Browser) openStream() (*Stream, func() error, error) {
+	if err := b.ctx.Err(); err != nil {
+		return nil, nil, err
+	}
 	if b.data != nil {
-		stream, err := OpenStreamBytes(b.filename, b.data, b.options.Limits)
+		stream, err := OpenStreamBytesContext(b.ctx, b.filename, b.data, b.options.Limits)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -70,7 +85,7 @@ func (b *Browser) openStream() (*Stream, func() error, error) {
 	if b.first != nil {
 		content := b.first
 		b.first = nil
-		stream, err := OpenStream(b.filename, content, b.options.Limits)
+		stream, err := OpenStreamContext(b.ctx, b.filename, content, b.options.Limits)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -83,7 +98,7 @@ func (b *Browser) openStream() (*Stream, func() error, error) {
 	if err != nil {
 		return nil, nil, fmt.Errorf("reopening archive: %w", err)
 	}
-	stream, err := OpenStream(b.filename, content, b.options.Limits)
+	stream, err := OpenStreamContext(b.ctx, b.filename, content, b.options.Limits)
 	if err != nil {
 		_ = content.Close()
 		return nil, nil, err

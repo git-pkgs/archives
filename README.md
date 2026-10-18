@@ -122,6 +122,12 @@ pass wraps `errors.ErrUnsupported`. ZIP and conda buffer their compressed input
 once and reuse it across passes. Close each extracted file before another
 operation; a browser is not safe for concurrent use.
 
+Use `OpenBrowserContext(ctx, ...)` to cancel listing, prefix detection, and file
+reads, including decompression of buffered ZIP and conda input. The same context
+applies to every pass. Supply a request context or one with a deadline, and make
+the reopen callback honor it if opening can block. Close extracted files after
+cancellation too; the browser still leaves the initial input owned by the caller.
+
 ### Sequential reading
 
 `OpenStream` reads entries one at a time through `Next` and `Read`, without
@@ -166,6 +172,14 @@ ZIP and conda require random access to their compressed input. `OpenStream`
 buffers that input within `MaxInputBytes`; `OpenStreamBytes(name, data, options)`
 reuses an existing byte slice without copying it. Keep that slice unchanged
 until `Close`. TAR and gem can consume a forward-only input directly.
+
+`OpenStreamContext(ctx, ...)` and `OpenStreamBytesContext(ctx, ...)` add
+cancellation to the same operations. Checks run between reads, while skipping
+entries, and while parsing ZIP metadata. Cancellation errors match
+`context.Canceled` or `context.DeadlineExceeded` and end iteration. These methods
+cannot interrupt an input read already blocked inside the caller's reader; use
+a context-aware input for that. The constructors without a context use
+`context.Background()`.
 
 Zero limits default to 512 MiB for each byte limit and 100,000 entries.
 Negative limits are rejected. Entry and expanded-byte limits use logical

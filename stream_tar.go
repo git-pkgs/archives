@@ -2,6 +2,7 @@ package archives
 
 import (
 	"archive/tar"
+	"context"
 	"fmt"
 	"io"
 )
@@ -11,12 +12,12 @@ type tarStream struct {
 	closer io.Closer
 }
 
-func newTarStream(content io.Reader, compression string) (*tarStream, error) {
-	r, closer, err := tarContentReader(content, compression)
+func newTarStream(ctx context.Context, content io.Reader, compression string) (*tarStream, error) {
+	r, closer, err := tarContentReader(contextReader{ctx: ctx, reader: content}, compression)
 	if err != nil {
 		return nil, err
 	}
-	return &tarStream{reader: tar.NewReader(r), closer: closer}, nil
+	return &tarStream{reader: tar.NewReader(contextReader{ctx: ctx, reader: r}), closer: closer}, nil
 }
 
 func (t *tarStream) Next() (*StreamEntry, error) {
@@ -48,9 +49,10 @@ func containerOptions(options StreamOptions) StreamOptions {
 	return options
 }
 
-func newContainerTar(content io.Reader, options StreamOptions) *Stream {
+func newContainerTar(ctx context.Context, content io.Reader, options StreamOptions) *Stream {
 	return &Stream{
-		source:  &tarStream{reader: tar.NewReader(content)},
+		ctx:     ctx,
+		source:  &tarStream{reader: tar.NewReader(contextReader{ctx: ctx, reader: content})},
 		options: containerOptions(options),
 	}
 }
@@ -73,7 +75,7 @@ func (g *gemStream) Next() (*StreamEntry, error) {
 			if entry.Path != "data.tar.gz" {
 				continue
 			}
-			g.inner, err = newTarStream(g.outer, compressionGzip)
+			g.inner, err = newTarStream(g.outer.ctx, g.outer, compressionGzip)
 			if err != nil {
 				return nil, fmt.Errorf("opening data.tar.gz: %w", err)
 			}

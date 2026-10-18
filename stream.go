@@ -72,18 +72,11 @@ func OpenStreamBytes(filename string, content []byte, options StreamOptions) (*S
 }
 
 func openStream(filename string, content io.Reader, raw []byte, options StreamOptions) (*Stream, error) {
-	format := detectFormat(filename)
-	if format == "" {
-		buffered := bufio.NewReaderSize(content, contentSniffSize)
-		prefix, err := buffered.Peek(contentSniffSize)
-		if err != nil && err != io.EOF {
-			return nil, fmt.Errorf("reading archive content: %w", err)
-		}
-		format = detectContentPrefixFormat(prefix)
-		content = buffered
+	format, content, err := streamFormat(filename, content)
+	if err != nil {
+		return nil, err
 	}
 	var source streamSource
-	var err error
 	switch format {
 	case formatZIP, formatConda:
 		if raw == nil {
@@ -106,6 +99,23 @@ func openStream(filename string, content io.Reader, raw []byte, options StreamOp
 		return nil, err
 	}
 	return &Stream{source: source, options: options}, nil
+}
+
+func streamFormat(filename string, content io.Reader) (string, io.Reader, error) {
+	format := detectFormat(filename)
+	if format == "" {
+		buffered := bufio.NewReaderSize(content, contentSniffSize)
+		prefix, err := buffered.Peek(contentSniffSize)
+		if err != nil && err != io.EOF {
+			return "", nil, fmt.Errorf("reading archive content: %w", err)
+		}
+		format = detectContentPrefixFormat(prefix)
+		content = buffered
+	}
+	if format == "" {
+		return "", nil, fmt.Errorf("%w: archive format: %s", errors.ErrUnsupported, filename)
+	}
+	return format, content, nil
 }
 
 func (o StreamOptions) defaults() (StreamOptions, error) {

@@ -72,6 +72,54 @@ Compressed content is opened as TAR and returns a parser error when it does not
 contain a TAR archive. `Open` reads at most 512 bytes before rejecting an
 unsupported stream with no recognised extension.
 
+### Streaming browsing
+
+`OpenBrowser` lists directories and extracts individual files without retaining
+expanded bodies. It uses the same formats and limits as `OpenStream`.
+
+```go
+reopen := func() (io.ReadCloser, error) { return os.Open("package.tar.gz") }
+content, err := reopen()
+if err != nil {
+    return err
+}
+defer content.Close()
+browser, err := archives.OpenBrowser("package.tar.gz", content, reopen, archives.BrowseOptions{
+    Limits: archives.StreamOptions{MaxInputBytes: 64 << 20},
+    DetectRoot: true,
+})
+if err != nil {
+    return err
+}
+files, err := browser.ListDir("")
+if err != nil {
+    return err
+}
+fmt.Println(files)
+file, err := browser.Extract("README.md")
+if err != nil {
+    return err
+}
+defer file.Close()
+```
+
+`DetectRoot` strips one shared top-level directory. Top-level files, including
+an archive containing only `README.md`, remain visible. `StripPrefix` sets an
+explicit prefix such as `package/` and takes precedence over root detection.
+`CommonRoot(files)` exposes the same detection for metadata from a buffered reader.
+
+Listing retains metadata in archive order, including duplicate files. Extraction
+returns the first matching entry and leaves later entries unchecked. Missing paths
+wrap `fs.ErrNotExist`; directories wrap `archives.ErrIsDir`. Limits apply per pass.
+
+The caller owns the initial input, including when construction fails. Keep it open
+until the first operation and any extracted file finish. TAR and gem use `reopen`
+for later passes; the browser closes those readers. Root detection adds a pass
+before extraction. A nil callback is allowed, but attempting another sequential
+pass wraps `errors.ErrUnsupported`. ZIP and conda buffer their compressed input
+once and reuse it across passes. Close each extracted file before another
+operation; a browser is not safe for concurrent use.
+
 ### Sequential reading
 
 `OpenStream` reads entries one at a time through `Next` and `Read`, without

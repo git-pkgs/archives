@@ -17,7 +17,7 @@ func (p *prefixStripper) List() ([]FileInfo, error) {
 		return nil, err
 	}
 
-	return p.stripPrefix(files), nil
+	return stripFilePrefix(files, p.prefix), nil
 }
 
 func (p *prefixStripper) ListDir(dirPath string) ([]FileInfo, error) {
@@ -28,7 +28,7 @@ func (p *prefixStripper) ListDir(dirPath string) ([]FileInfo, error) {
 		return nil, err
 	}
 
-	return p.stripPrefix(files), nil
+	return stripFilePrefix(files, p.prefix), nil
 }
 
 func (p *prefixStripper) Extract(filePath string) (io.ReadCloser, error) {
@@ -45,19 +45,19 @@ func (p *prefixStripper) Close() error {
 	return p.reader.Close()
 }
 
-// stripPrefix removes the prefix from all file paths.
-func (p *prefixStripper) stripPrefix(files []FileInfo) []FileInfo {
+// stripFilePrefix removes the prefix from all file paths.
+func stripFilePrefix(files []FileInfo, prefix string) []FileInfo {
 	result := make([]FileInfo, 0, len(files))
 
 	for _, f := range files {
 		// Skip files that don't have the prefix
-		if !strings.HasPrefix(f.Path, p.prefix) {
+		if !strings.HasPrefix(f.Path, prefix) {
 			continue
 		}
 
 		// Strip the prefix
 		stripped := f
-		stripped.Path = strings.TrimPrefix(f.Path, p.prefix)
+		stripped.Path = strings.TrimPrefix(f.Path, prefix)
 		stripped.Name = extractName(stripped.Path)
 
 		// Skip if path is now empty (was the prefix directory itself)

@@ -1,6 +1,6 @@
 # archives
 
-A Go library for reading and browsing archive files in memory. Supports ZIP, TAR (with gzip, bzip2, xz, zstd compression), Ruby gem, and conda formats.
+A Go library for reading and browsing archive files in memory. Supports ZIP, TAR (with gzip, bzip2, xz, zstd compression), Ruby gem, Hex, and conda formats.
 
 ## Installation
 
@@ -115,7 +115,7 @@ returns the first matching entry and leaves later entries unchecked. Missing pat
 wrap `fs.ErrNotExist`; directories wrap `archives.ErrIsDir`. Limits apply per pass.
 
 The caller owns the initial input, including when construction fails. Keep it open
-until the first operation and any extracted file finish. TAR and gem use `reopen`
+until the first operation and any extracted file finish. TAR, gem, and Hex use `reopen`
 for later passes; the browser closes those readers. Root detection adds a pass
 before extraction. A nil callback is allowed, but attempting another sequential
 pass wraps `errors.ErrUnsupported`. ZIP and conda buffer their compressed input
@@ -132,7 +132,7 @@ cancellation too; the browser still leaves the initial input owned by the caller
 
 `OpenStream` reads entries one at a time through `Next` and `Read`, without
 retaining expanded file bodies. It supports every format listed below,
-including the inner files of gem and conda packages.
+including the inner files of gem, Hex, and conda packages.
 
 ```go
 stream, err := archives.OpenStream("package.tgz", f, archives.StreamOptions{
@@ -173,6 +173,15 @@ buffers that input within `MaxInputBytes`; `OpenStreamBytes(name, data, options)
 reuses an existing byte slice without copying it. Keep that slice unchanged
 until `Close`. TAR and gem can consume a forward-only input directly.
 
+Hex packages use `.tar` filenames. Buffered readers, streams, and browsers detect
+the four regular outer files `VERSION`, `CHECKSUM`, `metadata.config`, and
+`contents.tar.gz` in any order, with `VERSION` equal to `3` and a 64-character
+uppercase hexadecimal checksum. They expose the files inside `contents.tar.gz`.
+A TAR without this signature keeps its outer entries. Detection buffers the outer
+prefix within `MaxInputBytes`; if the contents member precedes other markers,
+that prefix includes its compressed body. Expanded file bodies remain streamed.
+`Hash` covers the original outer TAR. Detection does not verify the package checksum.
+
 `OpenStreamContext(ctx, ...)` and `OpenStreamBytesContext(ctx, ...)` add
 cancellation to the same operations. Checks run between reads, while skipping
 entries, and while parsing ZIP metadata. Cancellation errors match
@@ -184,7 +193,7 @@ a context-aware input for that. The constructors without a context use
 Zero limits default to 512 MiB for each byte limit and 100,000 entries.
 Negative limits are rejected. Entry and expanded-byte limits use logical
 header sizes, including sparse files, before exposing a body. Container members
-in gem and conda have a separate entry-count budget, with their combined bodies
+in gem, Hex, and conda have a separate entry-count budget, with their combined bodies
 bounded by `MaxInputBytes`. Decoder workspace and metadata are additional memory;
 these limits do not cap total heap usage. For forward-only input, the input
 limit covers bytes consumed, with at most one extra byte read to detect overflow.
@@ -274,6 +283,7 @@ for _, f := range result.Files {
 - `.zip`, `.jar`, `.whl`, `.nupkg`, `.egg`, `.vsix` (ZIP-based)
 - `.tar`, `.tar.gz`, `.tgz`, `.crate`, `.tar.bz2`, `.tar.xz`, `.tar.zst`
 - `.gem` (Ruby gems with nested data.tar.gz)
+- `.tar` Hex packages (detected by outer markers, with nested contents.tar.gz)
 - `.conda` (v2 conda packages: zip of `pkg-*.tar.zst` and `info-*.tar.zst`, presented as one merged tar)
 - `.apk` (routed by content: Android packages open as ZIP, Alpine packages open as gzipped tar)
 

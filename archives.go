@@ -4,6 +4,7 @@
 //   - ZIP (.zip, .jar, .whl, .nupkg, .egg, .vsix)
 //   - TAR (.tar, .tar.gz, .tgz, .crate, .tar.bz2, .tar.xz, .tar.zst)
 //   - GEM (.gem - Ruby gems with nested tar structure)
+//   - Hex (.tar - Hex packages with nested contents.tar.gz)
 //   - CONDA (.conda - v2 conda packages, zip of zstd tarballs)
 //
 // The .apk extension is routed by content since Android packages are ZIP
@@ -16,6 +17,7 @@ package archives
 
 import (
 	"bufio"
+	"bytes"
 	"fmt"
 	"io"
 	"path"
@@ -130,6 +132,13 @@ func openRaw(format string, raw []byte) (Reader, error) {
 	case formatZIP:
 		return openZip(raw)
 	case formatTAR:
+		hexPackage, err := isHex(bytes.NewReader(raw), StreamOptions{MaxInputBytes: maxDecompressedSize, MaxEntries: maxArchiveEntries})
+		if err != nil {
+			return nil, err
+		}
+		if hexPackage {
+			return openNestedTar(raw, hexContents, "Hex")
+		}
 		return openTar(raw, "")
 	case formatTarGzip, formatTGZ:
 		return openTar(raw, compressionGzip)

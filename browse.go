@@ -36,7 +36,7 @@ type Browser struct {
 
 // OpenBrowser prepares an archive for browsing. The caller owns content and
 // must keep it open until the first operation and any extracted file finish.
-// Later TAR and gem passes call reopen; the browser closes those readers.
+// Later TAR, gem, and Hex passes call reopen; the browser closes those readers.
 // ZIP and conda input is buffered once and reused without calling reopen.
 // A nil reopen is allowed, but a second sequential pass wraps errors.ErrUnsupported.
 func OpenBrowser(filename string, content io.Reader, reopen func() (io.ReadCloser, error), options BrowseOptions) (*Browser, error) {

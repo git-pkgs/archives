@@ -57,27 +57,29 @@ func newContainerTar(ctx context.Context, content io.Reader, options StreamOptio
 	}
 }
 
-type gemStream struct {
-	outer *Stream
-	inner *tarStream
+type nestedTarStream struct {
+	outer  *Stream
+	inner  *tarStream
+	member string
+	kind   string
 }
 
-func (g *gemStream) Next() (*StreamEntry, error) {
+func (g *nestedTarStream) Next() (*StreamEntry, error) {
 	if g.inner == nil {
 		for {
 			entry, err := g.outer.Next()
 			if err == io.EOF {
-				return nil, fmt.Errorf("data.tar.gz not found in gem")
+				return nil, fmt.Errorf("%s not found in %s", g.member, g.kind)
 			}
 			if err != nil {
 				return nil, err
 			}
-			if entry.Path != "data.tar.gz" {
+			if entry.Path != g.member {
 				continue
 			}
 			g.inner, err = newTarStream(g.outer.ctx, g.outer, compressionGzip)
 			if err != nil {
-				return nil, fmt.Errorf("opening data.tar.gz: %w", err)
+				return nil, fmt.Errorf("opening %s: %w", g.member, err)
 			}
 			break
 		}
@@ -85,14 +87,14 @@ func (g *gemStream) Next() (*StreamEntry, error) {
 	return g.inner.Next()
 }
 
-func (g *gemStream) Read(p []byte) (int, error) {
+func (g *nestedTarStream) Read(p []byte) (int, error) {
 	if g.inner == nil {
 		return 0, io.EOF
 	}
 	return g.inner.Read(p)
 }
 
-func (g *gemStream) Close() error {
+func (g *nestedTarStream) Close() error {
 	var err error
 	if g.inner != nil {
 		err = g.inner.Close()

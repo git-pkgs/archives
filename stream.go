@@ -50,7 +50,8 @@ type streamSource interface {
 }
 
 // OpenStream reads supported archives sequentially. ZIP and conda input is
-// buffered up to MaxInputBytes for random access; TAR and gem input is streamed.
+// buffered up to MaxInputBytes for random access. Hex detection buffers an outer
+// TAR prefix; TAR, gem, and Hex entry bodies are streamed.
 // The caller owns content and must close it when needed.
 func OpenStream(filename string, content io.Reader, options StreamOptions) (*Stream, error) {
 	return OpenStreamContext(context.Background(), filename, content, options)
@@ -105,7 +106,9 @@ func openStream(ctx context.Context, filename string, content io.Reader, raw []b
 		}
 		source, err = newZipStream(ctx, raw, options, format == formatConda)
 	case formatGem:
-		source = &gemStream{outer: newContainerTar(ctx, content, options)}
+		source = &nestedTarStream{outer: newContainerTar(ctx, content, options), member: "data.tar.gz", kind: "gem"}
+	case formatTAR:
+		source = &plainTarStream{ctx: ctx, content: content, options: options}
 	default:
 		compression, ok := streamCompression(format)
 		if !ok {

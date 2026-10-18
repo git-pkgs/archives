@@ -176,21 +176,27 @@ func (b *Browser) Extract(filePath string) (io.ReadCloser, error) {
 	if err != nil {
 		return nil, err
 	}
+	target := prefix + filePath
+	dir := prefix + strings.TrimSuffix(filePath, "/") + "/"
+	isDir := false
 	for {
 		entry, err := stream.Next()
 		if err != nil {
 			_ = release()
-			if err == io.EOF {
-				return nil, fmt.Errorf("%w: %s", fs.ErrNotExist, filePath)
+			if err != io.EOF {
+				return nil, err
 			}
-			return nil, err
+			if isDir {
+				return nil, fmt.Errorf("%w: %s", ErrIsDir, filePath)
+			}
+			return nil, fmt.Errorf("%w: %s", fs.ErrNotExist, filePath)
 		}
-		if entry.Path != prefix+filePath {
+		// Implicit directories only show up as prefixes of later entries.
+		if strings.HasPrefix(entry.Path, dir) || (entry.IsDir && entry.Path+"/" == dir) {
+			isDir = true
+		}
+		if entry.Path != target || entry.IsDir {
 			continue
-		}
-		if entry.IsDir {
-			_ = release()
-			return nil, fmt.Errorf("%w: %s", ErrIsDir, filePath)
 		}
 		return &browsedFile{Reader: stream, release: release}, nil
 	}

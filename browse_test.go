@@ -301,3 +301,41 @@ func TestBrowserExtractClosesReopenedInput(t *testing.T) {
 		}
 	}
 }
+
+func TestBrowserExtractDirectories(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		entries []string
+		options BrowseOptions
+		target  string
+	}{
+		{"explicit without slash", []string{"dir/", "dir/a"}, BrowseOptions{}, "dir"},
+		{"explicit with slash", []string{"dir/", "dir/a"}, BrowseOptions{}, "dir/"},
+		{"implicit without slash", []string{"dir/a"}, BrowseOptions{}, "dir"},
+		{"implicit with slash", []string{"dir/a"}, BrowseOptions{}, "dir/"},
+		{"nested implicit", []string{"dir/sub/a"}, BrowseOptions{}, "dir/sub"},
+		{"stripped root", []string{"pkg/dir/a"}, BrowseOptions{DetectRoot: true}, "dir"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			data := browseTar(t, tc.entries...)
+			b, err := OpenBrowser("test.tar", bytes.NewReader(data), func() (io.ReadCloser, error) {
+				return io.NopCloser(bytes.NewReader(data)), nil
+			}, tc.options)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := b.Extract(tc.target); !errors.Is(err, ErrIsDir) {
+				t.Fatalf("Extract(%q) error = %v, want ErrIsDir", tc.target, err)
+			}
+		})
+	}
+
+	data := browseTar(t, "dir/a", "dirx")
+	b, err := OpenBrowser("test.tar", bytes.NewReader(data), nil, BrowseOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.Extract("di"); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("Extract(di) error = %v, want fs.ErrNotExist", err)
+	}
+}

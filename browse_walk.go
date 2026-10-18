@@ -8,8 +8,8 @@ import (
 
 // walk calls fn for each entry in archive order until fn returns an error or
 // the archive ends. fn may read the entry body from the stream.
-func (a *Browser) walk(fn func(entry *StreamEntry) error) error {
-	stream, release, err := a.openStream()
+func (b *Browser) walk(fn func(entry *StreamEntry) error) error {
+	stream, release, err := b.openStream()
 	if err != nil {
 		return err
 	}

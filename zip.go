@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -76,6 +77,10 @@ func checkZipEntryCount(raw []byte) error {
 }
 
 func checkZipEntryCountLimit(raw []byte, limit int) error {
+	return checkZipEntryCountLimitContext(context.Background(), raw, limit)
+}
+
+func checkZipEntryCountLimitContext(ctx context.Context, raw []byte, limit int) error {
 	start, end, ok := zipCentralDirectoryBounds(raw)
 	if !ok {
 		return nil
@@ -83,6 +88,9 @@ func checkZipEntryCountLimit(raw []byte, limit int) error {
 
 	count := 0
 	for offset := start; offset+zipDirectoryHeaderLen <= end; {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if binary.LittleEndian.Uint32(raw[offset:]) != zipDirectoryHeaderSignature {
 			break
 		}

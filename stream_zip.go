@@ -3,12 +3,14 @@ package archives
 import (
 	"archive/zip"
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"strings"
 )
 
 type zipStream struct {
+	ctx     context.Context
 	reader  *zip.Reader
 	index   int
 	file    *zip.File
@@ -16,11 +18,11 @@ type zipStream struct {
 }
 
 //nolint:ireturn // archive formats share a sequential source
-func newZipStream(raw []byte, options StreamOptions, conda bool) (streamSource, error) {
-	if err := checkZipEntryCountLimit(raw, options.MaxEntries); err != nil {
+func newZipStream(ctx context.Context, raw []byte, options StreamOptions, conda bool) (streamSource, error) {
+	if err := checkZipEntryCountLimitContext(ctx, raw, options.MaxEntries); err != nil {
 		return nil, err
 	}
-	reader, err := zip.NewReader(bytes.NewReader(raw), int64(len(raw)))
+	reader, err := zip.NewReader(contextReaderAt{ctx: ctx, reader: bytes.NewReader(raw)}, int64(len(raw)))
 	if err != nil {
 		return nil, fmt.Errorf("opening zip: %w", err)
 	}
@@ -28,9 +30,9 @@ func newZipStream(raw []byte, options StreamOptions, conda bool) (streamSource, 
 		return nil, ErrEntryLimit
 	}
 	reader.RegisterDecompressor(zip.Deflate, newFlateReader)
-	z := &zipStream{reader: reader}
+	z := &zipStream{ctx: ctx, reader: reader}
 	if conda {
-		return &condaStream{outer: &Stream{source: z, options: containerOptions(options)}}, nil
+		return &condaStream{outer: &Stream{ctx: ctx, source: z, options: containerOptions(options)}}, nil
 	}
 	return z, nil
 }
@@ -55,6 +57,9 @@ func (z *zipStream) Next() (*StreamEntry, error) {
 }
 
 func (z *zipStream) Read(p []byte) (int, error) {
+	if err := z.ctx.Err(); err != nil {
+		return 0, err
+	}
 	if z.file == nil {
 		return 0, io.EOF
 	}
@@ -107,7 +112,7 @@ func (c *condaStream) Next() (*StreamEntry, error) {
 			continue
 		}
 		c.found = true
-		c.inner, err = newTarStream(c.outer, compressionZstd)
+		c.inner, err = newTarStream(c.outer.ctx, c.outer, compressionZstd)
 		if err != nil {
 			return nil, fmt.Errorf("opening %s: %w", entry.Path, err)
 		}

@@ -3,6 +3,7 @@ package archives
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -34,6 +35,7 @@ type StreamEntry struct {
 // Paths and duplicate entries are preserved. A Stream is not safe for
 // concurrent use. It does not implement the random-access Reader interface.
 type Stream struct {
+	ctx      context.Context
 	source   streamSource
 	options  StreamOptions
 	expanded int64
@@ -48,19 +50,32 @@ type streamSource interface {
 }
 
 // OpenStream reads supported archives sequentially. ZIP and conda input is
-// buffered up to MaxInputBytes for random access; TAR and gem input is streamed.
+// buffered up to MaxInputBytes for random access. Hex detection buffers an outer
+// TAR prefix; TAR, gem, and Hex entry bodies are streamed.
 // The caller owns content and must close it when needed.
 func OpenStream(filename string, content io.Reader, options StreamOptions) (*Stream, error) {
+	return OpenStreamContext(context.Background(), filename, content, options)
+}
+
+// OpenStreamContext is OpenStream with cancellation during reading and decoding.
+// Cancellation is terminal. The caller owns content; canceling does not close it.
+func OpenStreamContext(ctx context.Context, filename string, content io.Reader, options StreamOptions) (*Stream, error) {
 	options, err := options.defaults()
 	if err != nil {
 		return nil, err
 	}
-	return openStream(filename, &streamInput{reader: content, remaining: options.MaxInputBytes}, nil, options)
+	return openStream(ctx, filename, &streamInput{reader: content, remaining: options.MaxInputBytes}, nil, options)
 }
 
 // OpenStreamBytes reuses content without copying it, including ZIP and conda
 // input. The caller must not modify the slice until the stream is closed.
 func OpenStreamBytes(filename string, content []byte, options StreamOptions) (*Stream, error) {
+	return OpenStreamBytesContext(context.Background(), filename, content, options)
+}
+
+// OpenStreamBytesContext is OpenStreamBytes with cancellation, including while
+// decoding or skipping buffered ZIP and conda entries.
+func OpenStreamBytesContext(ctx context.Context, filename string, content []byte, options StreamOptions) (*Stream, error) {
 	options, err := options.defaults()
 	if err != nil {
 		return nil, err
@@ -68,22 +83,19 @@ func OpenStreamBytes(filename string, content []byte, options StreamOptions) (*S
 	if int64(len(content)) > options.MaxInputBytes {
 		return nil, ErrInputLimit
 	}
-	return openStream(filename, bytes.NewReader(content), content, options)
+	return openStream(ctx, filename, bytes.NewReader(content), content, options)
 }
 
-func openStream(filename string, content io.Reader, raw []byte, options StreamOptions) (*Stream, error) {
-	format := detectFormat(filename)
-	if format == "" {
-		buffered := bufio.NewReaderSize(content, contentSniffSize)
-		prefix, err := buffered.Peek(contentSniffSize)
-		if err != nil && err != io.EOF {
-			return nil, fmt.Errorf("reading archive content: %w", err)
-		}
-		format = detectContentPrefixFormat(prefix)
-		content = buffered
+func openStream(ctx context.Context, filename string, content io.Reader, raw []byte, options StreamOptions) (*Stream, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	content = contextReader{ctx: ctx, reader: content}
+	format, content, err := streamFormat(filename, content)
+	if err != nil {
+		return nil, err
 	}
 	var source streamSource
-	var err error
 	switch format {
 	case formatZIP, formatConda:
 		if raw == nil {
@@ -92,20 +104,42 @@ func openStream(filename string, content io.Reader, raw []byte, options StreamOp
 				return nil, err
 			}
 		}
-		source, err = newZipStream(raw, options, format == formatConda)
+		source, err = newZipStream(ctx, raw, options, format == formatConda)
 	case formatGem:
-		source = &gemStream{outer: newContainerTar(content, options)}
+		source = &nestedTarStream{outer: newContainerTar(ctx, content, options), member: "data.tar.gz", kind: "gem"}
+	case formatTAR:
+		source = &plainTarStream{ctx: ctx, content: content, options: options}
 	default:
 		compression, ok := streamCompression(format)
 		if !ok {
 			return nil, fmt.Errorf("%w: archive format: %s", errors.ErrUnsupported, filename)
 		}
-		source, err = newTarStream(content, compression)
+		source, err = newTarStream(ctx, content, compression)
 	}
 	if err != nil {
+		if canceled := ctx.Err(); canceled != nil {
+			return nil, canceled
+		}
 		return nil, err
 	}
-	return &Stream{source: source, options: options}, nil
+	return &Stream{ctx: ctx, source: source, options: options}, nil
+}
+
+func streamFormat(filename string, content io.Reader) (string, io.Reader, error) {
+	format := detectFormat(filename)
+	if format == "" {
+		buffered := bufio.NewReaderSize(content, contentSniffSize)
+		prefix, err := buffered.Peek(contentSniffSize)
+		if err != nil && err != io.EOF {
+			return "", nil, fmt.Errorf("reading archive content: %w", err)
+		}
+		format = detectContentPrefixFormat(prefix)
+		content = buffered
+	}
+	if format == "" {
+		return "", nil, fmt.Errorf("%w: archive format: %s", errors.ErrUnsupported, filename)
+	}
+	return format, content, nil
 }
 
 func (o StreamOptions) defaults() (StreamOptions, error) {
@@ -156,6 +190,10 @@ func (s *Stream) Next() (*StreamEntry, error) {
 	if s.err != nil {
 		return nil, s.err
 	}
+	if err := s.ctx.Err(); err != nil {
+		s.err = err
+		return nil, err
+	}
 	entry, err := s.source.Next()
 	if err == nil {
 		err = s.checkEntry(entry)
@@ -190,6 +228,10 @@ func (s *Stream) Read(p []byte) (int, error) {
 	}
 	if s.err != nil {
 		return 0, s.err
+	}
+	if err := s.ctx.Err(); err != nil {
+		s.err = err
+		return 0, err
 	}
 	n, err := s.source.Read(p)
 	if err != nil && err != io.EOF {

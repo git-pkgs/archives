@@ -105,20 +105,41 @@ func (b *Browser) prefix() (string, error) {
 	return root.prefix(), err
 }
 
-// ListDir returns immediate children in archive order, retaining only metadata.
-// Root detection and listing share one pass. Duplicate files are preserved.
-func (b *Browser) ListDir(dirPath string) ([]FileInfo, error) {
+func (b *Browser) entries() ([]FileInfo, string, error) {
 	var entries []FileInfo
 	err := b.walk(func(entry *StreamEntry) error {
 		entries = append(entries, entry.FileInfo)
 		return nil
 	})
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	prefix := b.options.StripPrefix
 	if prefix == "" && b.options.DetectRoot {
 		prefix = CommonRoot(entries)
+	}
+	return entries, prefix, nil
+}
+
+// List returns all entries in archive order, retaining only metadata.
+// Root detection and listing share one pass. Duplicate entries are preserved.
+func (b *Browser) List() ([]FileInfo, error) {
+	files, prefix, err := b.entries()
+	if err != nil {
+		return nil, err
+	}
+	if prefix == "" {
+		return files, nil
+	}
+	return stripFilePrefix(files, prefix), nil
+}
+
+// ListDir returns immediate children in archive order, retaining only metadata.
+// Root detection and listing share one pass. Duplicate files are preserved.
+func (b *Browser) ListDir(dirPath string) ([]FileInfo, error) {
+	entries, prefix, err := b.entries()
+	if err != nil {
+		return nil, err
 	}
 	files := listDir(entries, prefix+dirPath)
 	if prefix == "" {

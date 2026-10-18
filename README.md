@@ -74,7 +74,7 @@ unsupported stream with no recognised extension.
 
 ### Streaming browsing
 
-`OpenBrowser` lists directories and extracts individual files without retaining
+`OpenBrowser` lists entries and directories and extracts files without retaining
 expanded bodies. It uses the same formats and limits as `OpenStream`.
 
 ```go
@@ -108,7 +108,9 @@ an archive containing only `README.md`, remain visible. `StripPrefix` sets an
 explicit prefix such as `package/` and takes precedence over root detection.
 `CommonRoot(files)` exposes the same detection for metadata from a buffered reader.
 
-Listing retains metadata in archive order, including duplicate files. Extraction
+`List()` returns all entries, including nested paths, in one pass. `ListDir(path)`
+returns immediate children. Both retain metadata in archive order, including
+duplicate files, and apply the configured prefix stripping. Extraction
 returns the first matching entry and leaves later entries unchecked. Missing paths
 wrap `fs.ErrNotExist`; directories wrap `archives.ErrIsDir`. Limits apply per pass.
 

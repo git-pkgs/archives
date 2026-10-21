@@ -68,8 +68,8 @@ reader, _ := archives.OpenBytes("pkg.tgz", data)
 
 Filename mappings are used first. When a name has no supported extension,
 `Open` and `OpenBytes` detect ZIP, TAR, gzip, bzip2, xz, and zstd from the content.
-Compressed content is opened as TAR and returns a parser error when it does not
-contain a TAR archive. `Open` reads at most 512 bytes before rejecting an
+Compressed content is inspected for TAR headers; other payloads become a single
+member named `content`. `Open` reads at most 512 bytes before rejecting an
 unsupported stream with no recognised extension.
 
 ### Streaming browsing
@@ -180,6 +180,13 @@ buffers that input within `MaxInputBytes`; `OpenStreamBytes(name, data, options)
 reuses an existing byte slice without copying it. Keep that slice unchanged
 until `Close`. TAR and gem can consume a forward-only input directly.
 
+When content detection finds gzip, bzip2, xz or zstd, the decompressed prefix
+determines whether to read TAR entries or expose one member named `content`.
+The single member has `Size: -1` in streams and browser listings because its size
+is unknown before reading. Entry and expansion limits apply while reading or
+skipping it. Buffered readers report its actual size. Explicit TAR filenames
+such as `.tar.gz` still require TAR content.
+
 Hex packages use `.tar` filenames. Buffered readers, streams, and browsers detect
 the four regular outer files `VERSION`, `CHECKSUM`, `metadata.config`, and
 `contents.tar.gz` in any order, with `VERSION` equal to `3` and a 64-character
@@ -289,6 +296,7 @@ for _, f := range result.Files {
 
 - `.zip`, `.jar`, `.whl`, `.nupkg`, `.egg`, `.vsix` (ZIP-based)
 - `.tar`, `.tar.gz`, `.tgz`, `.crate`, `.tar.bz2`, `.tar.xz`, `.tar.zst`
+- gzip, bzip2, xz and zstd compressed single files, detected by content
 - `.gem` (Ruby gems with nested data.tar.gz)
 - `.tar` Hex packages (detected by outer markers, with nested contents.tar.gz)
 - `.conda` (v2 conda packages: zip of `pkg-*.tar.zst` and `info-*.tar.zst`, presented as one merged tar)

@@ -35,13 +35,16 @@ type StreamEntry struct {
 // Paths and duplicate entries are preserved. A Stream is not safe for
 // concurrent use. It does not implement the random-access Reader interface.
 type Stream struct {
-	ctx      context.Context
-	source   streamSource
-	options  StreamOptions
-	expanded int64
-	entries  int
-	err      error
-	closed   bool
+	ctx         context.Context
+	source      streamSource
+	options     StreamOptions
+	expanded    int64
+	entries     int
+	err         error
+	closed      bool
+	unknownSize bool
+	entryBytes  int64
+	entryPath   string
 }
 
 type streamSource interface {
@@ -51,7 +54,8 @@ type streamSource interface {
 
 // OpenStream reads supported archives sequentially. ZIP and conda input is
 // buffered up to MaxInputBytes for random access. Hex detection buffers an outer
-// TAR prefix; TAR, gem, and Hex entry bodies are streamed.
+// TAR prefix; TAR, gem, and Hex entry bodies are streamed. Compression detected
+// by content exposes a non-TAR payload as one member named "content", with size -1.
 // The caller owns content and must close it when needed.
 func OpenStream(filename string, content io.Reader, options StreamOptions) (*Stream, error) {
 	return OpenStreamContext(context.Background(), filename, content, options)
@@ -109,6 +113,8 @@ func openStream(ctx context.Context, filename string, content io.Reader, raw []b
 		source = &nestedTarStream{outer: newContainerTar(ctx, content, options), member: "data.tar.gz", kind: "gem"}
 	case formatTAR:
 		source = &plainTarStream{ctx: ctx, content: content, options: options}
+	case compressionGzip, compressionBzip2, compressionXZ, compressionZstd:
+		source, err = newCompressedStream(ctx, content, format)
 	default:
 		compression, ok := streamCompression(format)
 		if !ok {
@@ -180,7 +186,8 @@ func streamCompression(format string) (string, bool) {
 
 // Next discards the unread body and returns the next entry, or io.EOF.
 // Header sizes, including sparse logical sizes, count against limits before
-// the body is exposed. MaxEntries counts visible entries; nested containers
+// the body is exposed. Unknown sizes count as bytes are read or skipped.
+// MaxEntries counts visible entries; nested containers
 // have a separate MaxEntries budget. Hidden TAR extension headers are excluded.
 // Any iteration error is terminal.
 func (s *Stream) Next() (*StreamEntry, error) {
@@ -194,6 +201,11 @@ func (s *Stream) Next() (*StreamEntry, error) {
 		s.err = err
 		return nil, err
 	}
+	if s.unknownSize {
+		if _, err := io.Copy(io.Discard, s); err != nil {
+			return nil, err
+		}
+	}
 	entry, err := s.source.Next()
 	if err == nil {
 		err = s.checkEntry(entry)
@@ -203,7 +215,12 @@ func (s *Stream) Next() (*StreamEntry, error) {
 		return nil, err
 	}
 	s.entries++
-	s.expanded += entry.Size
+	s.unknownSize = entry.Size == -1
+	s.entryBytes = 0
+	s.entryPath = entry.Path
+	if !s.unknownSize {
+		s.expanded += entry.Size
+	}
 	return entry, nil
 }
 
@@ -211,7 +228,8 @@ func (s *Stream) checkEntry(entry *StreamEntry) error {
 	if s.entries >= s.options.MaxEntries {
 		return fmt.Errorf("%w: exceeds %d", ErrEntryLimit, s.options.MaxEntries)
 	}
-	if entry.Size < 0 || entry.Size > s.options.MaxEntryBytes {
+	_, singleFile := s.source.(*compressedStream)
+	if (entry.Size < 0 && (!singleFile || entry.Size != -1)) || entry.Size > s.options.MaxEntryBytes {
 		return fmt.Errorf("%w: %s exceeds %d bytes", ErrEntrySizeLimit, entry.Path, s.options.MaxEntryBytes)
 	}
 	if entry.Size > s.options.MaxExpandedBytes-s.expanded {
@@ -233,10 +251,41 @@ func (s *Stream) Read(p []byte) (int, error) {
 		s.err = err
 		return 0, err
 	}
-	n, err := s.source.Read(p)
+	var n int
+	var err error
+	if s.unknownSize {
+		n, err = s.readUnknownSize(p)
+	} else {
+		n, err = s.source.Read(p)
+	}
 	if err != nil && err != io.EOF {
 		s.err = err
 	}
+	return n, err
+}
+
+func (s *Stream) readUnknownSize(p []byte) (int, error) {
+	if len(p) == 0 {
+		return 0, nil
+	}
+	remaining := min(s.options.MaxEntryBytes-s.entryBytes, s.options.MaxExpandedBytes-s.expanded)
+	if remaining == 0 {
+		var probe [1]byte
+		n, err := s.source.Read(probe[:])
+		if n > 0 {
+			if s.entryBytes == s.options.MaxEntryBytes {
+				return 0, fmt.Errorf("%w: %s exceeds %d bytes", ErrEntrySizeLimit, s.entryPath, s.options.MaxEntryBytes)
+			}
+			return 0, fmt.Errorf("%w: %s exceeds %d expanded bytes", ErrDecompressLimit, s.entryPath, s.options.MaxExpandedBytes)
+		}
+		return 0, err
+	}
+	if int64(len(p)) > remaining {
+		p = p[:remaining]
+	}
+	n, err := s.source.Read(p)
+	s.entryBytes += int64(n)
+	s.expanded += int64(n)
 	return n, err
 }
 

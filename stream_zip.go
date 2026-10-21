@@ -85,6 +85,17 @@ func (z *zipStream) Close() error {
 	return nil
 }
 
+func (z *zipStream) recover() error {
+	if z.current != nil {
+		if err := z.current.Close(); err != nil {
+			return err
+		}
+	}
+	z.current = nil
+	z.file = nil
+	return nil
+}
+
 type condaStream struct {
 	outer *Stream
 	inner *tarStream

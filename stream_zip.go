@@ -85,6 +85,15 @@ func (z *zipStream) Close() error {
 	return nil
 }
 
+func (z *zipStream) recover() {
+	if z.current != nil {
+		// A decompressor can repeat the already-reported member error on Close.
+		_ = z.current.Close()
+	}
+	z.current = nil
+	z.file = nil
+}
+
 type condaStream struct {
 	outer *Stream
 	inner *tarStream

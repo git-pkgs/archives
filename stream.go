@@ -240,6 +240,32 @@ func (s *Stream) Read(p []byte) (int, error) {
 	return n, err
 }
 
+// Recover abandons a failed ZIP entry so the next call to Next can continue.
+// TAR-based formats, including conda, return errors.ErrUnsupported, as does a
+// stream with no pending error. Cancellation and resource-limit errors remain
+// terminal. Recovery does not validate the discarded body.
+func (s *Stream) Recover() error {
+	if s.closed {
+		return fs.ErrClosed
+	}
+	if err := s.ctx.Err(); err != nil {
+		return err
+	}
+	if s.err == nil || errors.Is(s.err, io.EOF) {
+		return errors.ErrUnsupported
+	}
+	if errors.Is(s.err, ErrInputLimit) || errors.Is(s.err, ErrEntryLimit) || errors.Is(s.err, ErrEntrySizeLimit) || errors.Is(s.err, ErrDecompressLimit) {
+		return s.err
+	}
+	zip, ok := s.source.(*zipStream)
+	if !ok {
+		return errors.ErrUnsupported
+	}
+	zip.recover()
+	s.err = nil
+	return nil
+}
+
 // Close releases resources without draining or closing the input. Unread
 // content and compressed trailers after a TAR end marker are not validated.
 func (s *Stream) Close() error {

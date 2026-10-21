@@ -45,6 +45,9 @@ type Stream struct {
 	unknownSize bool
 	entryBytes  int64
 	entryPath   string
+	pending     *StreamEntry
+	entryRead   bool
+	reserved    int64
 }
 
 type streamSource interface {
@@ -189,7 +192,8 @@ func streamCompression(format string) (string, bool) {
 // the body is exposed. Unknown sizes count as bytes are read or skipped.
 // MaxEntries counts visible entries; nested containers
 // have a separate MaxEntries budget. Hidden TAR extension headers are excluded.
-// Any iteration error is terminal.
+// Entry-limit errors return the rejected entry alongside the error.
+// Errors remain terminal unless explicitly cleared by Recover or Skip.
 func (s *Stream) Next() (*StreamEntry, error) {
 	if s.closed {
 		return nil, fs.ErrClosed
@@ -206,20 +210,27 @@ func (s *Stream) Next() (*StreamEntry, error) {
 			return nil, err
 		}
 	}
+	s.pending = nil
+	s.reserved = 0
+	s.entryRead = false
 	entry, err := s.source.Next()
 	if err == nil {
+		s.pending = entry
 		err = s.checkEntry(entry)
+		if !errors.Is(err, ErrEntryLimit) {
+			s.entries++
+		}
 	}
 	if err != nil {
 		s.err = err
-		return nil, err
+		return entry, err
 	}
-	s.entries++
 	s.unknownSize = entry.Size == -1
 	s.entryBytes = 0
 	s.entryPath = entry.Path
 	if !s.unknownSize {
 		s.expanded += entry.Size
+		s.reserved = entry.Size
 	}
 	return entry, nil
 }
@@ -233,7 +244,7 @@ func (s *Stream) checkEntry(entry *StreamEntry) error {
 		return fmt.Errorf("%w: %s exceeds %d bytes", ErrEntrySizeLimit, entry.Path, s.options.MaxEntryBytes)
 	}
 	if entry.Size > s.options.MaxExpandedBytes-s.expanded {
-		return fmt.Errorf("%w: exceeds %d bytes", ErrDecompressLimit, s.options.MaxExpandedBytes)
+		return fmt.Errorf("%w: %s exceeds remaining budget of %d bytes", ErrDecompressLimit, entry.Path, s.options.MaxExpandedBytes-s.expanded)
 	}
 	return nil
 }
@@ -253,6 +264,9 @@ func (s *Stream) Read(p []byte) (int, error) {
 	}
 	var n int
 	var err error
+	if len(p) > 0 {
+		s.entryRead = true
+	}
 	if s.unknownSize {
 		n, err = s.readUnknownSize(p)
 	} else {
@@ -311,6 +325,37 @@ func (s *Stream) Recover() error {
 		return errors.ErrUnsupported
 	}
 	zip.recover()
+	s.err = nil
+	s.pending = nil
+	return nil
+}
+
+// Skip abandons an unread ZIP entry without decompressing or validating it.
+// It also clears size-limit errors returned with an entry by Next. The entry
+// counts toward MaxEntries, but its unread body does not consume expanded bytes.
+// Other formats, missing entries and entries already read return ErrUnsupported.
+// Cancellation, input limits and entry-count limits remain terminal.
+func (s *Stream) Skip() error {
+	if s.closed {
+		return fs.ErrClosed
+	}
+	if err := s.ctx.Err(); err != nil {
+		return err
+	}
+	if errors.Is(s.err, io.EOF) {
+		return errors.ErrUnsupported
+	}
+	if s.err != nil && !errors.Is(s.err, ErrEntrySizeLimit) && !errors.Is(s.err, ErrDecompressLimit) {
+		return s.err
+	}
+	zip, ok := s.source.(*zipStream)
+	if !ok || s.pending == nil || s.entryRead {
+		return errors.ErrUnsupported
+	}
+	zip.recover()
+	s.expanded -= s.reserved
+	s.pending = nil
+	s.reserved = 0
 	s.err = nil
 	return nil
 }

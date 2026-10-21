@@ -175,6 +175,14 @@ the next member's offset. TAR-based formats, including conda, return
 Cancellation and limit errors remain terminal. Recovery does not validate unread
 data in the discarded member.
 
+`stream.Skip()` abandons an unread ZIP entry without decompressing or validating
+its body. This also clears a size-limit rejection from `Next`, which returns the
+rejected entry alongside its error. The entry still counts toward `MaxEntries`,
+but its unread body does not consume the expanded-byte budget. Later entries can
+use the remaining budget. `Skip` rejects entries already read and does not support
+TAR-based formats or conda. Input limits, entry-count limits and cancellation
+remain terminal.
+
 ZIP and conda require random access to their compressed input. `OpenStream`
 buffers that input within `MaxInputBytes`; `OpenStreamBytes(name, data, options)`
 reuses an existing byte slice without copying it. Keep that slice unchanged

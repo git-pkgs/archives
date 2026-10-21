@@ -3,6 +3,7 @@ package archives
 import (
 	"archive/tar"
 	"bufio"
+	"bytes"
 	"context"
 	"io"
 
@@ -31,7 +32,9 @@ func newCompressedStream(ctx context.Context, content io.Reader, compression str
 		}
 		return nil, err
 	}
-	if magic.DetectPrefix(prefix).Format == magic.FormatTAR {
+	// The TAR parser also accepts v7 headers without a ustar signature.
+	_, headerErr := tar.NewReader(bytes.NewReader(prefix)).Next()
+	if magic.DetectPrefix(prefix).Format == magic.FormatTAR || headerErr == nil {
 		return &tarStream{reader: tar.NewReader(buffered), closer: closer}, nil
 	}
 	return &compressedStream{reader: buffered, closer: closer}, nil

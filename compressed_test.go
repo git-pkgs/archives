@@ -1,6 +1,7 @@
 package archives
 
 import (
+	"archive/zip"
 	"bytes"
 	"context"
 	"crypto/sha256"
@@ -8,8 +9,84 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
+	"strings"
 	"testing"
 )
+
+func TestCompressedV7TAR(t *testing.T) {
+	raw := tarWithPayloads(t, []byte("hello"))
+	clear(raw[257:512])
+	copy(raw[148:156], "        ")
+	var checksum int
+	for _, value := range raw[:512] {
+		checksum += int(value)
+	}
+	copy(raw[148:156], fmt.Sprintf("%06o\x00 ", checksum))
+	data := gzipTar(t, raw)
+	r, err := OpenBytes("download", data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = r.Close() }()
+	files, err := r.List()
+	if err != nil || len(files) != 1 || files[0].Path != "package/lib/file0" || files[0].Size != 5 {
+		t.Fatalf("v7 listing: %+v %v", files, err)
+	}
+	assertTarPayload(t, r, "package/lib/file0", []byte("hello"))
+	s, err := OpenStreamBytes("download", data, StreamOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertStreamMatches(t, s, r, files)
+}
+
+func TestStreamRejectsNegativeZIP64Size(t *testing.T) {
+	for _, size := range []uint64{math.MaxUint64, math.MaxUint64 - 1, math.MaxInt64 + 1} {
+		var buf bytes.Buffer
+		w := zip.NewWriter(&buf)
+		member, err := w.CreateRaw(&zip.FileHeader{Name: "oversized", Method: zip.Store, UncompressedSize64: size, CompressedSize64: 1})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := io.WriteString(member, "x"); err != nil {
+			t.Fatal(err)
+		}
+		if err := w.Close(); err != nil {
+			t.Fatal(err)
+		}
+		s, err := OpenStreamBytes("oversized.zip", buf.Bytes(), StreamOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.Next(); !errors.Is(err, ErrEntrySizeLimit) {
+			t.Fatalf("size %d: %v", size, err)
+		}
+		if err := s.Recover(); !errors.Is(err, ErrEntrySizeLimit) {
+			t.Fatalf("size error must remain terminal: %v", err)
+		}
+		_ = s.Close()
+	}
+}
+
+func TestCompressedSingleFileListingLimits(t *testing.T) {
+	for _, test := range []struct {
+		limits StreamOptions
+		want   error
+	}{
+		{StreamOptions{MaxEntryBytes: 5}, ErrEntrySizeLimit},
+		{StreamOptions{MaxExpandedBytes: 5}, ErrDecompressLimit},
+	} {
+		browser, err := OpenBrowser("bundle.gz", bytes.NewReader(gzipTar(t, []byte(singleFilePayload))), nil, BrowseOptions{Limits: test.limits})
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = browser.List()
+		if !errors.Is(err, test.want) || !strings.Contains(err.Error(), "content exceeds 5") {
+			t.Fatalf("listing limit must include member path: %v", err)
+		}
+	}
+}
 
 const singleFilePayload = "certificate content\n"
 

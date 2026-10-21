@@ -44,6 +44,7 @@ type Stream struct {
 	closed      bool
 	unknownSize bool
 	entryBytes  int64
+	entryPath   string
 }
 
 type streamSource interface {
@@ -216,6 +217,7 @@ func (s *Stream) Next() (*StreamEntry, error) {
 	s.entries++
 	s.unknownSize = entry.Size == -1
 	s.entryBytes = 0
+	s.entryPath = entry.Path
 	if !s.unknownSize {
 		s.expanded += entry.Size
 	}
@@ -226,7 +228,8 @@ func (s *Stream) checkEntry(entry *StreamEntry) error {
 	if s.entries >= s.options.MaxEntries {
 		return fmt.Errorf("%w: exceeds %d", ErrEntryLimit, s.options.MaxEntries)
 	}
-	if entry.Size < -1 || entry.Size > s.options.MaxEntryBytes {
+	_, singleFile := s.source.(*compressedStream)
+	if (entry.Size < 0 && (!singleFile || entry.Size != -1)) || entry.Size > s.options.MaxEntryBytes {
 		return fmt.Errorf("%w: %s exceeds %d bytes", ErrEntrySizeLimit, entry.Path, s.options.MaxEntryBytes)
 	}
 	if entry.Size > s.options.MaxExpandedBytes-s.expanded {
@@ -271,9 +274,9 @@ func (s *Stream) readUnknownSize(p []byte) (int, error) {
 		n, err := s.source.Read(probe[:])
 		if n > 0 {
 			if s.entryBytes == s.options.MaxEntryBytes {
-				return 0, ErrEntrySizeLimit
+				return 0, fmt.Errorf("%w: %s exceeds %d bytes", ErrEntrySizeLimit, s.entryPath, s.options.MaxEntryBytes)
 			}
-			return 0, ErrDecompressLimit
+			return 0, fmt.Errorf("%w: %s exceeds %d expanded bytes", ErrDecompressLimit, s.entryPath, s.options.MaxExpandedBytes)
 		}
 		return 0, err
 	}

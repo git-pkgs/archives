@@ -192,7 +192,7 @@ func streamCompression(format string) (string, bool) {
 // the body is exposed. Unknown sizes count as bytes are read or skipped.
 // MaxEntries counts visible entries; nested containers
 // have a separate MaxEntries budget. Hidden TAR extension headers are excluded.
-// Entry-limit errors return the rejected entry alongside the error.
+// Size and entry-count limit errors return the rejected entry alongside the error.
 // Errors remain terminal unless explicitly cleared by Recover or Skip.
 func (s *Stream) Next() (*StreamEntry, error) {
 	if s.closed {

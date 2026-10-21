@@ -66,6 +66,9 @@ func (z *zipStream) Read(p []byte) (int, error) {
 	if z.current == nil {
 		var err error
 		z.current, err = z.file.Open()
+		if err == io.EOF {
+			err = io.ErrUnexpectedEOF
+		}
 		if err != nil {
 			return 0, err
 		}

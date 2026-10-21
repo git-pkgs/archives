@@ -4,6 +4,7 @@ import (
 	"archive/tar"
 	"archive/zip"
 	"bytes"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -436,6 +437,47 @@ func TestStreamZipChecksumOnSkip(t *testing.T) {
 		if _, err := s.Next(); !errors.Is(err, zip.ErrChecksum) {
 			t.Fatalf("skipped corrupt entry: %v", err)
 		}
+	}
+}
+
+func TestStreamZipTruncatedLocalHeader(t *testing.T) {
+	var buf bytes.Buffer
+	w := zip.NewWriter(&buf)
+	file, err := w.Create("root.pem")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := file.Write([]byte("certificate content")); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	data := buf.Bytes()
+	directory := bytes.Index(data, []byte("PK\x01\x02"))
+	if directory < 0 {
+		t.Fatal("missing central directory")
+	}
+	binary.LittleEndian.PutUint32(data[directory+42:], uint32(len(data)))
+	for _, skip := range []bool{false, true} {
+		t.Run(fmt.Sprintf("skip=%v", skip), func(t *testing.T) {
+			stream, err := OpenStreamBytes("broken.zip", data, StreamOptions{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = stream.Close() }()
+			if _, err := stream.Next(); err != nil {
+				t.Fatal(err)
+			}
+			if !skip {
+				if _, err := io.ReadAll(stream); !errors.Is(err, io.ErrUnexpectedEOF) {
+					t.Fatalf("Read: %v", err)
+				}
+			}
+			if _, err := stream.Next(); !errors.Is(err, io.ErrUnexpectedEOF) {
+				t.Fatalf("Next: %v", err)
+			}
+		})
 	}
 }
 

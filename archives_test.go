@@ -89,8 +89,8 @@ func TestIsInDir(t *testing.T) {
 		{"dir/subdir/file.txt", "dir/", false},
 		{"dir/subdir/file.txt", "dir/subdir/", true},
 		{"other/file.txt", "dir/", false},
-		{"dir/", "", true},        // dir entry is in root
-		{"dir/", "dir/", true},    // explicit entry for the directory itself
+		{"dir/", "", true},     // dir entry is in root
+		{"dir/", "dir/", true}, // explicit entry for the directory itself
 		{"dirX/file", "dir/", false},
 	}
 
@@ -460,13 +460,13 @@ func TestOpenDoesNotInferGem(t *testing.T) {
 	}
 }
 
-func TestOpenCompressedNonTar(t *testing.T) {
+func TestExplicitCompressedTarRejectsNonTar(t *testing.T) {
 	buf := new(bytes.Buffer)
 	w := gzip.NewWriter(buf)
 	_, _ = w.Write([]byte("not a tar archive"))
 	_ = w.Close()
 
-	_, err := OpenBytes("artifact", buf.Bytes())
+	_, err := OpenBytes("artifact.tar.gz", buf.Bytes())
 	if err == nil {
 		t.Fatal("compressed non-TAR content was accepted")
 	}

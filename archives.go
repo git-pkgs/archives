@@ -48,7 +48,7 @@ const (
 type FileInfo struct {
 	Path           string    // Full path within archive
 	Name           string    // Base name
-	Size           int64     // Uncompressed size in bytes
+	Size           int64     // Uncompressed bytes; -1 for an unknown streaming size
 	ModTime        time.Time // Modification time
 	IsDir          bool      // Whether this is a directory
 	Mode           uint32    // fs.FileMode value: permission bits plus fs.ModeType bits
@@ -152,6 +152,8 @@ func openRaw(format string, raw []byte) (Reader, error) {
 		return openGem(raw)
 	case formatConda:
 		return openConda(raw)
+	case compressionGzip, compressionBzip2, compressionXZ, compressionZstd:
+		return openCompressed(raw)
 	default:
 		return nil, fmt.Errorf("unsupported format: %s", format)
 	}
@@ -171,14 +173,8 @@ func archiveFormat(detected string) string {
 		return formatZIP
 	case "tar":
 		return formatTAR
-	case compressionGzip:
-		return formatTarGzip
-	case compressionBzip2:
-		return formatTarBzip2
-	case compressionXZ:
-		return formatTarXZ
-	case compressionZstd:
-		return formatTarZstd
+	case compressionGzip, compressionBzip2, compressionXZ, compressionZstd:
+		return detected
 	default:
 		return ""
 	}

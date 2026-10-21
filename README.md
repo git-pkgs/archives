@@ -170,9 +170,10 @@ data and compression trailers beyond that marker may remain unchecked.
 
 After a ZIP member error, callers can explicitly call `stream.Recover()` to
 discard that member and continue with `Next`. The central directory provides
-the next member's offset. Other formats return `errors.ErrUnsupported` from
-`Recover`; cancellation and limit errors remain terminal. Recovery does not
-validate unread data in the discarded member.
+the next member's offset. TAR-based formats, including conda, return
+`errors.ErrUnsupported` from `Recover`, as does a stream with no pending error.
+Cancellation and limit errors remain terminal. Recovery does not validate unread
+data in the discarded member.
 
 ZIP and conda require random access to their compressed input. `OpenStream`
 buffers that input within `MaxInputBytes`; `OpenStreamBytes(name, data, options)`

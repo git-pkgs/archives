@@ -241,8 +241,9 @@ func (s *Stream) Read(p []byte) (int, error) {
 }
 
 // Recover abandons a failed ZIP entry so the next call to Next can continue.
-// Other formats return errors.ErrUnsupported. Cancellation and resource-limit
-// errors remain terminal. Recovery does not validate the discarded body.
+// TAR-based formats, including conda, return errors.ErrUnsupported, as does a
+// stream with no pending error. Cancellation and resource-limit errors remain
+// terminal. Recovery does not validate the discarded body.
 func (s *Stream) Recover() error {
 	if s.closed {
 		return fs.ErrClosed
@@ -260,9 +261,7 @@ func (s *Stream) Recover() error {
 	if !ok {
 		return errors.ErrUnsupported
 	}
-	if err := zip.recover(); err != nil {
-		return err
-	}
+	zip.recover()
 	s.err = nil
 	return nil
 }

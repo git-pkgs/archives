@@ -6,6 +6,6 @@ toolchain go1.26.7
 
 require (
 	github.com/git-pkgs/magic v0.5.0
-	github.com/klauspost/compress v1.20.1
+	github.com/klauspost/compress v1.20.3
 	github.com/ulikunitz/xz v0.5.17
 )

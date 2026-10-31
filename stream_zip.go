@@ -10,11 +10,12 @@ import (
 )
 
 type zipStream struct {
-	ctx     context.Context
-	reader  *zip.Reader
-	index   int
-	file    *zip.File
-	current io.ReadCloser
+	ctx        context.Context
+	reader     *zip.Reader
+	index      int
+	file       *zip.File
+	current    io.ReadCloser
+	skipUnread bool
 }
 
 //nolint:ireturn // archive formats share a sequential source
@@ -38,7 +39,7 @@ func newZipStream(ctx context.Context, raw []byte, options StreamOptions, conda 
 }
 
 func (z *zipStream) Next() (*StreamEntry, error) {
-	if z.file != nil {
+	if z.file != nil && (!z.skipUnread || z.current != nil) {
 		if _, err := io.Copy(io.Discard, z); err != nil {
 			return nil, err
 		}

@@ -32,6 +32,8 @@ type Browser struct {
 	reopen   func() (io.ReadCloser, error)
 	first    io.Reader
 	data     []byte
+	random   io.ReaderAt
+	size     int64
 }
 
 // OpenBrowser prepares an archive for browsing. The caller owns content and
@@ -74,6 +76,13 @@ func OpenBrowserContext(ctx context.Context, filename string, content io.Reader,
 func (b *Browser) openStream() (*Stream, func() error, error) {
 	if err := b.ctx.Err(); err != nil {
 		return nil, nil, err
+	}
+	if b.random != nil {
+		stream, err := OpenStreamReaderAtContext(b.ctx, b.filename, b.random, b.size, b.options.Limits)
+		if err != nil {
+			return nil, nil, err
+		}
+		return stream, stream.Close, nil
 	}
 	if b.data != nil {
 		stream, err := OpenStreamBytesContext(b.ctx, b.filename, b.data, b.options.Limits)

@@ -49,6 +49,25 @@ func TestExtractAllTarGz(t *testing.T) {
 	assertFileContent(t, filepath.Join(dir, "lib", "util.js"), "module.exports = {};")
 }
 
+func TestExtractAllSkipsGlobalPAXHeaders(t *testing.T) {
+	data := gzipTar(t, tarWithGlobalPAXHeaders(t, "repo-main/"))
+	r, err := OpenBytes("test.tar.gz", data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = r.Close() }()
+	dir := t.TempDir()
+	if err := ExtractAll(r, dir); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil || len(entries) != 1 || entries[0].Name() != "repo-main" {
+		t.Fatalf("extracted root = %v, %v", entries, err)
+	}
+	assertFileContent(t, filepath.Join(dir, "repo-main", "README.md"), "body: README.md")
+	assertFileContent(t, filepath.Join(dir, "repo-main", "pax_global_header"), "body: pax_global_header")
+}
+
 func TestExtractAllCreatesTargetDir(t *testing.T) {
 	reader, err := OpenBytes("test.zip", createTestZip())
 	if err != nil {

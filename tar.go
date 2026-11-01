@@ -61,6 +61,9 @@ func openTarWithInitialEntryCount(raw []byte, compression string, initialEntryCo
 		if err != nil {
 			return nil, fmt.Errorf("reading tar: %w", err)
 		}
+		if header.Typeflag == tar.TypeXGlobalHeader {
+			continue
+		}
 		if err := checkArchiveEntryCount(initialEntryCount + len(files) + 1); err != nil {
 			return nil, err
 		}

@@ -21,14 +21,19 @@ func newTarStream(ctx context.Context, content io.Reader, compression string) (*
 }
 
 func (t *tarStream) Next() (*StreamEntry, error) {
-	h, err := t.reader.Next()
-	if err != nil {
-		return nil, err
+	for {
+		h, err := t.reader.Next()
+		if err != nil {
+			return nil, err
+		}
+		if h.Typeflag == tar.TypeXGlobalHeader {
+			continue
+		}
+		return &StreamEntry{
+			FileInfo: fileInfoFromTar(h), Linkname: h.Linkname,
+			IsHardlink: h.Typeflag == tar.TypeLink,
+		}, nil
 	}
-	return &StreamEntry{
-		FileInfo: fileInfoFromTar(h), Linkname: h.Linkname,
-		IsHardlink: h.Typeflag == tar.TypeLink,
-	}, nil
 }
 
 func (t *tarStream) Read(p []byte) (int, error) {

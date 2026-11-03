@@ -229,19 +229,7 @@ func TestReaderAtZIP64AndPrefix(t *testing.T) {
 		if prefix {
 			data = append([]byte("executable prefix"), data...)
 		} else {
-			end := len(data) - zipDirectoryEndLen
-			record := make([]byte, zipDirectory64EndLen+zipDirectory64LocatorLen)
-			binary.LittleEndian.PutUint32(record, zipDirectory64EndSignature)
-			binary.LittleEndian.PutUint64(record[4:], 44)
-			binary.LittleEndian.PutUint64(record[24:], 2)
-			binary.LittleEndian.PutUint64(record[32:], 2)
-			binary.LittleEndian.PutUint64(record[40:], uint64(binary.LittleEndian.Uint32(data[end+12:])))
-			binary.LittleEndian.PutUint64(record[48:], uint64(binary.LittleEndian.Uint32(data[end+16:])))
-			binary.LittleEndian.PutUint32(record[56:], zipDirectory64LocSignature)
-			binary.LittleEndian.PutUint64(record[64:], uint64(end))
-			binary.LittleEndian.PutUint32(record[72:], 1)
-			data = append(append(data[:end:end], record...), data[end:]...)
-			binary.LittleEndian.PutUint16(data[len(data)-12:], zipDirectoryRecords64Marker)
+			data = withZIP64Count(data, 2)
 		}
 		b, err := OpenBrowserReaderAt("test.zip", bytes.NewReader(data), int64(len(data)), BrowseOptions{})
 		if err != nil {
@@ -249,6 +237,25 @@ func TestReaderAtZIP64AndPrefix(t *testing.T) {
 		}
 		assertBrowsedBody(t, b, "root/small", "hello")
 	}
+}
+
+// withZIP64Count adds a ZIP64 end record and locator to a ZIP that has no
+// archive comment. The ZIP64 record advertises records entries.
+func withZIP64Count(data []byte, records uint64) []byte {
+	end := len(data) - zipDirectoryEndLen
+	record := make([]byte, zipDirectory64EndLen+zipDirectory64LocatorLen)
+	binary.LittleEndian.PutUint32(record, zipDirectory64EndSignature)
+	binary.LittleEndian.PutUint64(record[4:], 44)
+	binary.LittleEndian.PutUint64(record[24:], records)
+	binary.LittleEndian.PutUint64(record[32:], records)
+	binary.LittleEndian.PutUint64(record[40:], uint64(binary.LittleEndian.Uint32(data[end+12:])))
+	binary.LittleEndian.PutUint64(record[48:], uint64(binary.LittleEndian.Uint32(data[end+16:])))
+	binary.LittleEndian.PutUint32(record[56:], zipDirectory64LocSignature)
+	binary.LittleEndian.PutUint64(record[64:], uint64(end))
+	binary.LittleEndian.PutUint32(record[72:], 1)
+	out := append(append(data[:end:end], record...), data[end:]...)
+	binary.LittleEndian.PutUint16(out[len(out)-12:], zipDirectoryRecords64Marker)
+	return out
 }
 
 // zipDirectoryStartForTest returns the central directory offset of data.
@@ -334,8 +341,10 @@ func TestZIPParserParity(t *testing.T) {
 		{name: "wrapped count", build: func(t *testing.T) []byte { t.Helper(); return wrappedCountZIP(t, 70_000) }, wantOpen: true},
 		{name: "wrapped count over limit", build: func(t *testing.T) []byte { t.Helper(); return wrappedCountZIP(t, 70_000) }, maxEntries: 69_999, wantErr: ErrEntryLimit},
 		{name: "headers over limit", build: edit(func([]byte) {}), maxEntries: 1, wantErr: ErrEntryLimit},
-		{name: "underreported count", build: endCount(1), maxEntries: 2},
-		{name: "advertised count over limit", build: endCount(40000), maxEntries: 2},
+		// archive/zip compares the advertised count modulo 65536, so these
+		// fixtures disagree with the headers but archive/zip still opens them.
+		{name: "underreported count", build: func(t *testing.T) []byte { t.Helper(); return wrappedCountZIP(t, 65_537) }, maxEntries: 65_537, wantOpen: true},
+		{name: "advertised count over limit", build: func(*testing.T) []byte { return withZIP64Count(bytes.Clone(valid), 2+65_536) }, maxEntries: 2, wantOpen: true},
 		{name: "header length", build: func(t *testing.T) []byte {
 			t.Helper()
 			data := bytes.Clone(valid)
@@ -364,6 +373,13 @@ func TestZIPParserParity(t *testing.T) {
 		{name: "truncated", build: func(*testing.T) []byte { return valid[:12] }},
 		{name: "empty", build: func(*testing.T) []byte { return nil }},
 		{name: "executable prefix", build: func(*testing.T) []byte { return append([]byte("executable prefix"), valid...) }, wantOpen: true},
+		{name: "comment past short window", build: func(t *testing.T) []byte {
+			t.Helper()
+			data := bytes.Clone(valid)
+			comment := bytes.Repeat([]byte("c"), 4*zipDirectoryEndShortWindow)
+			binary.LittleEndian.PutUint16(data[len(data)-2:], uint16(len(comment)))
+			return append(data, comment...)
+		}, wantOpen: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			data := tc.build(t)

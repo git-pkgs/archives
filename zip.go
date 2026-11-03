@@ -34,6 +34,7 @@ const (
 	zipDirectoryEndSignature     = 0x06054b50
 	zipDirectory64EndSignature   = 0x06064b50
 	zipDirectory64LocSignature   = 0x07064b50
+	zipDirectoryEndShortWindow   = 1024
 	zipDirectoryEndSearchWindow  = 65 * 1024
 	zipDirectoryRecords64Marker  = 0xffff
 	zipDirectorySizeOffsetMarker = 0xffffffff
@@ -119,56 +120,69 @@ func checkZipEntryCountLimitContext(ctx context.Context, input io.ReaderAt, size
 	return nil
 }
 
+// zipDirectoryEndRecord finds the end record the same way archive/zip does.
+// It searches a short tail first, because the record is at size-22 when the
+// archive has no comment. It widens the search only when that tail has no
+// record.
+func zipDirectoryEndRecord(input io.ReaderAt, size int64) ([]byte, int64, bool, error) {
+	for _, window := range [...]int64{zipDirectoryEndShortWindow, zipDirectoryEndSearchWindow} {
+		tailStart := max(size-window, 0)
+		tail := make([]byte, size-tailStart)
+		if err := readZipSource(input, tail, tailStart); err != nil {
+			return nil, 0, false, err
+		}
+		for offset := len(tail) - zipDirectoryEndLen; offset >= 0; offset-- {
+			if binary.LittleEndian.Uint32(tail[offset:]) != zipDirectoryEndSignature {
+				continue
+			}
+			commentLen := int(binary.LittleEndian.Uint16(tail[offset+20:]))
+			if offset+zipDirectoryEndLen+commentLen > len(tail) {
+				continue
+			}
+			return tail[offset : offset+zipDirectoryEndLen], tailStart + int64(offset), true, nil
+		}
+		if tailStart == 0 {
+			break
+		}
+	}
+	return nil, 0, false, nil
+}
+
 func zipCentralDirectoryBounds(input io.ReaderAt, size int64) (int64, int64, bool, error) {
-	tailStart := max(size-zipDirectoryEndSearchWindow, 0)
-	tail := make([]byte, size-tailStart)
-	if err := readZipSource(input, tail, tailStart); err != nil {
+	record, recordOffset, found, err := zipDirectoryEndRecord(input, size)
+	if err != nil || !found {
 		return 0, 0, false, err
 	}
 
-	for offset := len(tail) - zipDirectoryEndLen; offset >= 0; offset-- {
-		if binary.LittleEndian.Uint32(tail[offset:]) != zipDirectoryEndSignature {
-			continue
+	directoryEnd := recordOffset
+	directoryRecords := binary.LittleEndian.Uint16(record[10:])
+	directorySize := uint64(binary.LittleEndian.Uint32(record[12:]))
+	directoryOffset := uint64(binary.LittleEndian.Uint32(record[16:]))
+	if directoryRecords == zipDirectoryRecords64Marker ||
+		directorySize == zipDirectorySizeOffsetMarker ||
+		directoryOffset == zipDirectorySizeOffsetMarker {
+		var ok bool
+		directoryEnd, directorySize, directoryOffset, ok, err = zip64DirectoryRecord(input, size, recordOffset)
+		if err != nil || !ok {
+			return 0, 0, false, err
 		}
-		commentLen := int(binary.LittleEndian.Uint16(tail[offset+20:]))
-		if offset+zipDirectoryEndLen+commentLen > len(tail) {
-			continue
-		}
-
-		recordOffset := tailStart + int64(offset)
-		directoryEnd := recordOffset
-		directoryRecords := binary.LittleEndian.Uint16(tail[offset+10:])
-		directorySize := uint64(binary.LittleEndian.Uint32(tail[offset+12:]))
-		directoryOffset := uint64(binary.LittleEndian.Uint32(tail[offset+16:]))
-		if directoryRecords == zipDirectoryRecords64Marker ||
-			directorySize == zipDirectorySizeOffsetMarker ||
-			directoryOffset == zipDirectorySizeOffsetMarker {
-			var ok bool
-			var err error
-			directoryEnd, directorySize, directoryOffset, ok, err = zip64DirectoryRecord(input, size, recordOffset)
-			if err != nil || !ok {
-				return 0, 0, false, err
-			}
-		}
-
-		if directorySize > uint64(directoryEnd) {
-			return 0, 0, false, nil
-		}
-		start := directoryEnd - int64(directorySize)
-		if directoryOffset < uint64(start) {
-			// ZIPs can have an executable prefix whose length is absent from offsets.
-			var signature [zipSignatureLen]byte
-			if err := readZipSource(input, signature[:], int64(directoryOffset)); err != nil {
-				return 0, 0, false, err
-			}
-			if binary.LittleEndian.Uint32(signature[:]) == zipDirectoryHeaderSignature {
-				start = int64(directoryOffset)
-			}
-		}
-		return start, directoryEnd, true, nil
 	}
 
-	return 0, 0, false, nil
+	if directorySize > uint64(directoryEnd) {
+		return 0, 0, false, nil
+	}
+	start := directoryEnd - int64(directorySize)
+	if directoryOffset < uint64(start) {
+		// ZIPs can have an executable prefix whose length is absent from offsets.
+		var signature [zipSignatureLen]byte
+		if err := readZipSource(input, signature[:], int64(directoryOffset)); err != nil {
+			return 0, 0, false, err
+		}
+		if binary.LittleEndian.Uint32(signature[:]) == zipDirectoryHeaderSignature {
+			start = int64(directoryOffset)
+		}
+	}
+	return start, directoryEnd, true, nil
 }
 
 func zip64DirectoryRecord(input io.ReaderAt, size, endOffset int64) (int64, uint64, uint64, bool, error) {

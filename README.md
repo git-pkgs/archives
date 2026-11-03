@@ -213,8 +213,8 @@ if err != nil {
 files, err := browser.List()
 ```
 
-The random-access APIs check the central directory before allocating ZIP entry
-metadata. They skip unread ZIP bodies without decoding or checking their CRCs.
+The random-access APIs apply the same central directory checks as the byte-slice
+APIs and accept the same archives. They skip unread ZIP bodies without decoding or checking their CRCs.
 Declared sizes of skipped entries still count against expansion limits.
 Read a member through EOF to check its CRC. These APIs return `Stream` or
 `Browser`, not the `Reader` interface. For whole-artifact hashing, hash the

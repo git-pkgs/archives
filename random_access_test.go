@@ -4,11 +4,15 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"testing"
 )
 
@@ -167,27 +171,6 @@ func TestReaderAtLimitsAndCancellation(t *testing.T) {
 
 func TestReaderAtMalformedDirectory(t *testing.T) {
 	valid := randomAccessZIP(t, 16)
-	for _, tc := range []struct {
-		name   string
-		change func([]byte)
-		want   error
-	}{
-		{"underreported count", func(data []byte) { binary.LittleEndian.PutUint16(data[len(data)-12:], 1) }, zip.ErrFormat},
-		{"advertised count", func(data []byte) { binary.LittleEndian.PutUint16(data[len(data)-12:], 40000) }, ErrEntryLimit},
-		{"header length", func(data []byte) {
-			start, _, _ := zipCentralDirectoryBounds(data)
-			binary.LittleEndian.PutUint16(data[start+28:], 65535)
-		}, zip.ErrFormat},
-		{"signature", func(data []byte) { start, _, _ := zipCentralDirectoryBounds(data); data[start] = 0 }, zip.ErrFormat},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			data := bytes.Clone(valid)
-			tc.change(data)
-			if _, err := OpenStreamReaderAt("test.zip", bytes.NewReader(data), int64(len(data)), StreamOptions{MaxEntries: 2}); !errors.Is(err, tc.want) {
-				t.Fatalf("error = %v, want %v", err, tc.want)
-			}
-		})
-	}
 	for _, size := range []int64{-1, 0, 12} {
 		if _, err := OpenStreamReaderAt("test.zip", bytes.NewReader(valid), size, StreamOptions{}); err == nil {
 			t.Fatalf("accepted size %d", size)
@@ -265,5 +248,165 @@ func TestReaderAtZIP64AndPrefix(t *testing.T) {
 			t.Fatal(err)
 		}
 		assertBrowsedBody(t, b, "root/small", "hello")
+	}
+}
+
+// zipDirectoryStartForTest returns the central directory offset of data.
+func zipDirectoryStartForTest(t *testing.T, data []byte) int {
+	t.Helper()
+	start, _, ok, err := zipCentralDirectoryBounds(bytes.NewReader(data), int64(len(data)))
+	if err != nil || !ok {
+		t.Fatalf("directory bounds: ok=%v err=%v", ok, err)
+	}
+	return int(start)
+}
+
+// wrappedCountZIP has a classic end record whose 16-bit count has wrapped.
+func wrappedCountZIP(t *testing.T, entries int) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	writer := zip.NewWriter(&buf)
+	for i := range entries {
+		if _, err := writer.CreateHeader(&zip.FileHeader{Name: strconv.Itoa(i), Method: zip.Store}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	data := buf.Bytes()
+	start, end, ok, err := zipCentralDirectoryBounds(bytes.NewReader(data), int64(len(data)))
+	if err != nil || !ok {
+		t.Fatalf("directory bounds: ok=%v err=%v", ok, err)
+	}
+	record := make([]byte, zipDirectoryEndLen)
+	binary.LittleEndian.PutUint32(record, zipDirectoryEndSignature)
+	binary.LittleEndian.PutUint16(record[8:], uint16(entries))
+	binary.LittleEndian.PutUint16(record[10:], uint16(entries))
+	binary.LittleEndian.PutUint32(record[12:], uint32(end-start))
+	binary.LittleEndian.PutUint32(record[16:], uint32(start))
+	return append(data[:end:end], record...)
+}
+
+func streamContents(stream *Stream, openErr error) (string, error) {
+	if openErr != nil {
+		return "", openErr
+	}
+	defer func() { _ = stream.Close() }()
+	var out strings.Builder
+	for {
+		entry, err := stream.Next()
+		if err == io.EOF {
+			return out.String(), nil
+		}
+		if err != nil {
+			return out.String(), err
+		}
+		body, err := io.ReadAll(stream)
+		if err != nil {
+			return out.String(), err
+		}
+		fmt.Fprintf(&out, "%s=%x\n", entry.Path, sha256.Sum256(body))
+	}
+}
+
+func TestZIPParserParity(t *testing.T) {
+	valid := randomAccessZIP(t, 16)
+	edit := func(change func([]byte)) func(*testing.T) []byte {
+		return func(t *testing.T) []byte {
+			t.Helper()
+			data := bytes.Clone(valid)
+			change(data)
+			return data
+		}
+	}
+	endCount := func(count uint16) func(*testing.T) []byte {
+		return edit(func(data []byte) { binary.LittleEndian.PutUint16(data[len(data)-12:], count) })
+	}
+	for _, tc := range []struct {
+		name       string
+		build      func(*testing.T) []byte
+		maxEntries int
+		wantErr    error
+		wantOpen   bool
+	}{
+		{name: "valid", build: edit(func([]byte) {}), wantOpen: true},
+		{name: "wrapped count", build: func(t *testing.T) []byte { t.Helper(); return wrappedCountZIP(t, 70_000) }, wantOpen: true},
+		{name: "wrapped count over limit", build: func(t *testing.T) []byte { t.Helper(); return wrappedCountZIP(t, 70_000) }, maxEntries: 69_999, wantErr: ErrEntryLimit},
+		{name: "headers over limit", build: edit(func([]byte) {}), maxEntries: 1, wantErr: ErrEntryLimit},
+		{name: "underreported count", build: endCount(1), maxEntries: 2},
+		{name: "advertised count over limit", build: endCount(40000), maxEntries: 2},
+		{name: "header length", build: func(t *testing.T) []byte {
+			t.Helper()
+			data := bytes.Clone(valid)
+			binary.LittleEndian.PutUint16(data[zipDirectoryStartForTest(t, data)+28:], 65535)
+			return data
+		}},
+		{name: "header signature", build: func(t *testing.T) []byte {
+			t.Helper()
+			data := bytes.Clone(valid)
+			data[zipDirectoryStartForTest(t, data)] = 0
+			return data
+		}},
+		{name: "second header signature", build: func(t *testing.T) []byte {
+			t.Helper()
+			data := bytes.Clone(valid)
+			start := zipDirectoryStartForTest(t, data)
+			first := zipDirectoryHeaderLen + int(binary.LittleEndian.Uint16(data[start+28:]))
+			data[start+first] = 0
+			return data
+		}, maxEntries: 1},
+		{name: "no end record", build: edit(func(data []byte) { data[len(data)-zipDirectoryEndLen] = 0 })},
+		{name: "missing zip64 locator", build: endCount(zipDirectoryRecords64Marker)},
+		{name: "directory size past start", build: edit(func(data []byte) {
+			binary.LittleEndian.PutUint32(data[len(data)-10:], uint32(len(data)))
+		})},
+		{name: "truncated", build: func(*testing.T) []byte { return valid[:12] }},
+		{name: "empty", build: func(*testing.T) []byte { return nil }},
+		{name: "executable prefix", build: func(*testing.T) []byte { return append([]byte("executable prefix"), valid...) }, wantOpen: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			data := tc.build(t)
+			options := StreamOptions{MaxEntries: tc.maxEntries}
+			bytesStream, bytesOpenErr := OpenStreamBytes("test.zip", data, options)
+			bytesOut, bytesErr := streamContents(bytesStream, bytesOpenErr)
+			randomStream, randomOpenErr := OpenStreamReaderAt("test.zip", bytes.NewReader(data), int64(len(data)), options)
+			randomOut, randomErr := streamContents(randomStream, randomOpenErr)
+
+			if (bytesOpenErr == nil) != (randomOpenErr == nil) {
+				t.Fatalf("open errors differ: bytes=%v reader-at=%v", bytesOpenErr, randomOpenErr)
+			}
+			if fmt.Sprint(bytesErr) != fmt.Sprint(randomErr) {
+				t.Fatalf("errors differ: bytes=%v reader-at=%v", bytesErr, randomErr)
+			}
+			if bytesOut != randomOut {
+				t.Fatalf("entries differ:\nbytes:\n%s\nreader-at:\n%s", bytesOut, randomOut)
+			}
+			if tc.wantErr != nil && !errors.Is(randomErr, tc.wantErr) {
+				t.Fatalf("error = %v, want %v", randomErr, tc.wantErr)
+			}
+			if tc.wantOpen && randomErr != nil {
+				t.Fatalf("error = %v, want success", randomErr)
+			}
+		})
+	}
+}
+
+func TestZIPEntryCountBuffersDirectoryReads(t *testing.T) {
+	const entries = 5000
+	data := wrappedCountZIP(t, entries)
+	input := &countedReaderAt{Reader: bytes.NewReader(data)}
+	if err := checkZipEntryCountLimitContext(context.Background(), input, int64(len(data)), entries); err != nil {
+		t.Fatal(err)
+	}
+	if input.calls >= entries/10 {
+		t.Fatalf("ReadAt calls = %d for %d entries", input.calls, entries)
+	}
+}
+
+func TestReaderAtSourceShorterThanSize(t *testing.T) {
+	data := randomAccessZIP(t, 16)
+	if _, err := OpenStreamReaderAt("test.zip", bytes.NewReader(data), int64(len(data))+1, StreamOptions{}); !errors.Is(err, io.ErrUnexpectedEOF) {
+		t.Fatalf("error = %v, want %v", err, io.ErrUnexpectedEOF)
 	}
 }

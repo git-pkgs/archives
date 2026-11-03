@@ -20,7 +20,7 @@ type zipStream struct {
 
 //nolint:ireturn // archive formats share a sequential source
 func newZipStream(ctx context.Context, raw []byte, options StreamOptions, conda bool) (streamSource, error) {
-	if err := checkZipEntryCountLimitContext(ctx, raw, options.MaxEntries); err != nil {
+	if err := checkZipEntryCountLimitContext(ctx, bytes.NewReader(raw), int64(len(raw)), options.MaxEntries); err != nil {
 		return nil, err
 	}
 	reader, err := zip.NewReader(contextReaderAt{ctx: ctx, reader: bytes.NewReader(raw)}, int64(len(raw)))

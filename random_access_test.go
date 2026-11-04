@@ -367,6 +367,7 @@ func TestZIPParserParity(t *testing.T) {
 		}, maxEntries: 1},
 		{name: "no end record", build: edit(func(data []byte) { data[len(data)-zipDirectoryEndLen] = 0 })},
 		{name: "missing zip64 locator", build: endCount(zipDirectoryRecords64Marker)},
+		{name: "marker count without locator over limit", build: func(t *testing.T) []byte { t.Helper(); return wrappedCountZIP(t, 131_071) }, maxEntries: 131_070, wantErr: ErrEntryLimit},
 		{name: "directory size past start", build: edit(func(data []byte) {
 			binary.LittleEndian.PutUint32(data[len(data)-10:], uint32(len(data)))
 		})},
@@ -415,6 +416,16 @@ func withZIPComment(data []byte, length int) []byte {
 func TestZIPEntryCountSearchesPastShortWindow(t *testing.T) {
 	data := withZIPComment(randomAccessZIP(t, 16), 4*zipDirectoryEndShortWindow)
 	err := checkZipEntryCountLimitContext(context.Background(), bytes.NewReader(data), int64(len(data)), 1)
+	if !errors.Is(err, ErrEntryLimit) {
+		t.Fatalf("error = %v, want %v", err, ErrEntryLimit)
+	}
+}
+
+// archive/zip keeps the classic end record when no ZIP64 locator precedes it,
+// so the parser must still count headers when the count is the ZIP64 marker.
+func TestZIPEntryCountWithoutZIP64Locator(t *testing.T) {
+	data := wrappedCountZIP(t, 131_071)
+	err := checkZipEntryCountLimitContext(context.Background(), bytes.NewReader(data), int64(len(data)), 131_070)
 	if !errors.Is(err, ErrEntryLimit) {
 		t.Fatalf("error = %v, want %v", err, ErrEntryLimit)
 	}

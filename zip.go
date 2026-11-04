@@ -158,10 +158,17 @@ func zipCentralDirectoryBounds(input io.ReaderAt, size int64) (int64, int64, boo
 	if directoryRecords == zipDirectoryRecords64Marker ||
 		directorySize == zipDirectorySizeOffsetMarker ||
 		directoryOffset == zipDirectorySizeOffsetMarker {
-		var ok bool
-		directoryEnd, directorySize, directoryOffset, ok, err = zip64DirectoryRecord(input, size, recordOffset)
-		if err != nil || !ok {
+		recordOffset64, located, err := zip64LocatorOffset(input, recordOffset)
+		if err != nil {
 			return 0, 0, false, err
+		}
+		// Without a locator, archive/zip keeps the classic values, so count with them too.
+		if located {
+			var ok bool
+			directoryEnd, directorySize, directoryOffset, ok, err = zip64DirectoryRecord(input, size, recordOffset64)
+			if err != nil || !ok {
+				return 0, 0, false, err
+			}
 		}
 	}
 
@@ -182,18 +189,25 @@ func zipCentralDirectoryBounds(input io.ReaderAt, size int64) (int64, int64, boo
 	return start, directoryEnd, true, nil
 }
 
-func zip64DirectoryRecord(input io.ReaderAt, size, endOffset int64) (int64, uint64, uint64, bool, error) {
+// zip64LocatorOffset accepts the same locators as archive/zip: one disk, with
+// the ZIP64 end record on disk 0.
+func zip64LocatorOffset(input io.ReaderAt, endOffset int64) (uint64, bool, error) {
 	if endOffset < zipDirectory64LocatorLen {
-		return 0, 0, 0, false, nil
+		return 0, false, nil
 	}
 	var locator [zipDirectory64LocatorLen]byte
 	if err := readZipSource(input, locator[:], endOffset-zipDirectory64LocatorLen); err != nil {
-		return 0, 0, 0, false, err
+		return 0, false, err
 	}
-	if binary.LittleEndian.Uint32(locator[:]) != zipDirectory64LocSignature {
-		return 0, 0, 0, false, nil
+	if binary.LittleEndian.Uint32(locator[:]) != zipDirectory64LocSignature ||
+		binary.LittleEndian.Uint32(locator[4:]) != 0 ||
+		binary.LittleEndian.Uint32(locator[16:]) != 1 {
+		return 0, false, nil
 	}
-	recordOffset := binary.LittleEndian.Uint64(locator[8:])
+	return binary.LittleEndian.Uint64(locator[8:]), true, nil
+}
+
+func zip64DirectoryRecord(input io.ReaderAt, size int64, recordOffset uint64) (int64, uint64, uint64, bool, error) {
 	if size < zipDirectory64EndLen || recordOffset > uint64(size-zipDirectory64EndLen) {
 		return 0, 0, 0, false, nil
 	}

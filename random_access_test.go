@@ -373,13 +373,9 @@ func TestZIPParserParity(t *testing.T) {
 		{name: "truncated", build: func(*testing.T) []byte { return valid[:12] }},
 		{name: "empty", build: func(*testing.T) []byte { return nil }},
 		{name: "executable prefix", build: func(*testing.T) []byte { return append([]byte("executable prefix"), valid...) }, wantOpen: true},
-		{name: "comment past short window", build: func(t *testing.T) []byte {
-			t.Helper()
-			data := bytes.Clone(valid)
-			comment := bytes.Repeat([]byte("c"), 4*zipDirectoryEndShortWindow)
-			binary.LittleEndian.PutUint16(data[len(data)-2:], uint16(len(comment)))
-			return append(data, comment...)
-		}, wantOpen: true},
+		{name: "comment past short window", build: func(*testing.T) []byte {
+			return withZIPComment(valid, 4*zipDirectoryEndShortWindow)
+		}, maxEntries: 1, wantErr: ErrEntryLimit},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			data := tc.build(t)
@@ -405,6 +401,22 @@ func TestZIPParserParity(t *testing.T) {
 				t.Fatalf("error = %v, want success", randomErr)
 			}
 		})
+	}
+}
+
+func withZIPComment(data []byte, length int) []byte {
+	data = bytes.Clone(data)
+	binary.LittleEndian.PutUint16(data[len(data)-2:], uint16(length))
+	return append(data, bytes.Repeat([]byte("c"), length)...)
+}
+
+// The open path also checks len(reader.File), so only a direct parser call
+// shows that the wide search found the end record.
+func TestZIPEntryCountSearchesPastShortWindow(t *testing.T) {
+	data := withZIPComment(randomAccessZIP(t, 16), 4*zipDirectoryEndShortWindow)
+	err := checkZipEntryCountLimitContext(context.Background(), bytes.NewReader(data), int64(len(data)), 1)
+	if !errors.Is(err, ErrEntryLimit) {
+		t.Fatalf("error = %v, want %v", err, ErrEntryLimit)
 	}
 }
 

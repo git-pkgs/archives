@@ -120,10 +120,7 @@ func checkZipEntryCountLimitContext(ctx context.Context, input io.ReaderAt, size
 	return nil
 }
 
-// zipDirectoryEndRecord finds the end record the same way archive/zip does.
-// It searches a short tail first, because the record is at size-22 when the
-// archive has no comment. It widens the search only when that tail has no
-// record.
+// Search 1 KiB before 65 KiB, as archive/zip does; most archives have no comment.
 func zipDirectoryEndRecord(input io.ReaderAt, size int64) ([]byte, int64, bool, error) {
 	for _, window := range [...]int64{zipDirectoryEndShortWindow, zipDirectoryEndSearchWindow} {
 		tailStart := max(size-window, 0)

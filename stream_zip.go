@@ -10,16 +10,17 @@ import (
 )
 
 type zipStream struct {
-	ctx     context.Context
-	reader  *zip.Reader
-	index   int
-	file    *zip.File
-	current io.ReadCloser
+	ctx        context.Context
+	reader     *zip.Reader
+	index      int
+	file       *zip.File
+	current    io.ReadCloser
+	skipUnread bool
 }
 
 //nolint:ireturn // archive formats share a sequential source
 func newZipStream(ctx context.Context, raw []byte, options StreamOptions, conda bool) (streamSource, error) {
-	if err := checkZipEntryCountLimitContext(ctx, raw, options.MaxEntries); err != nil {
+	if err := checkZipEntryCountLimitContext(ctx, bytes.NewReader(raw), int64(len(raw)), options.MaxEntries); err != nil {
 		return nil, err
 	}
 	reader, err := zip.NewReader(contextReaderAt{ctx: ctx, reader: bytes.NewReader(raw)}, int64(len(raw)))
@@ -38,7 +39,7 @@ func newZipStream(ctx context.Context, raw []byte, options StreamOptions, conda 
 }
 
 func (z *zipStream) Next() (*StreamEntry, error) {
-	if z.file != nil {
+	if z.file != nil && (!z.skipUnread || z.current != nil) {
 		if _, err := io.Copy(io.Discard, z); err != nil {
 			return nil, err
 		}

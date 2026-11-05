@@ -188,6 +188,39 @@ buffers that input within `MaxInputBytes`; `OpenStreamBytes(name, data, options)
 reuses an existing byte slice without copying it. Keep that slice unchanged
 until `Close`. TAR and gem can consume a forward-only input directly.
 
+For an existing file or another `io.ReaderAt`, use
+`OpenStreamReaderAt(name, input, size, options)` or
+`OpenBrowserReaderAt(name, input, size, browseOptions)` to avoid copying ZIP
+and conda input. Each has a `Context` variant. The size is the complete compressed
+archive size and must fit `MaxInputBytes`. Keep the source open and unchanged
+until browsing and all extracted files finish. Closing a stream or extracted
+file does not close the source.
+
+```go
+file, err := os.Open("package.zip")
+if err != nil {
+    return err
+}
+defer file.Close()
+info, err := file.Stat()
+if err != nil {
+    return err
+}
+browser, err := archives.OpenBrowserReaderAt("package.zip", file, info.Size(), archives.BrowseOptions{})
+if err != nil {
+    return err
+}
+files, err := browser.List()
+```
+
+The random-access APIs apply the same central directory checks as the byte-slice
+APIs and accept the same archives. They skip unread ZIP bodies without decoding or checking their CRCs.
+Declared sizes of skipped entries still count against expansion limits.
+Read a member through EOF to check its CRC. These APIs return `Stream` or
+`Browser`, not the `Reader` interface. For whole-artifact hashing, hash the
+original source separately. The existing forward-only and byte-slice APIs keep
+their behavior.
+
 When content detection finds gzip, bzip2, xz or zstd, the decompressed prefix
 determines whether to read TAR entries or expose one member named `content`.
 The single member has `Size: -1` in streams and browser listings because its size

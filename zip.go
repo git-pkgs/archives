@@ -34,6 +34,7 @@ const (
 	zipDirectoryEndSignature     = 0x06054b50
 	zipDirectory64EndSignature   = 0x06064b50
 	zipDirectory64LocSignature   = 0x07064b50
+	zipDirectoryEndShortWindow   = 1024
 	zipDirectoryEndSearchWindow  = 65 * 1024
 	zipDirectoryRecords64Marker  = 0xffff
 	zipDirectorySizeOffsetMarker = 0xffffffff
@@ -73,32 +74,36 @@ func openZip(raw []byte) (*zipReader, error) {
 }
 
 func checkZipEntryCount(raw []byte) error {
-	return checkZipEntryCountLimit(raw, maxArchiveEntries)
+	return checkZipEntryCountLimitContext(context.Background(), bytes.NewReader(raw), int64(len(raw)), maxArchiveEntries)
 }
 
-func checkZipEntryCountLimit(raw []byte, limit int) error {
-	return checkZipEntryCountLimitContext(context.Background(), raw, limit)
-}
-
-func checkZipEntryCountLimitContext(ctx context.Context, raw []byte, limit int) error {
-	start, end, ok := zipCentralDirectoryBounds(raw)
-	if !ok {
-		return nil
+// checkZipEntryCountLimitContext counts central directory headers before
+// archive/zip builds its file list. Only the limit is enforced here. Malformed
+// directories are left for archive/zip to accept or reject.
+func checkZipEntryCountLimitContext(ctx context.Context, input io.ReaderAt, size int64, limit int) error {
+	start, end, ok, err := zipCentralDirectoryBounds(input, size)
+	if err != nil || !ok {
+		return err
 	}
 
+	headers := bufio.NewReader(io.NewSectionReader(input, start, end-start))
+	var header [zipDirectoryHeaderLen]byte
 	count := 0
-	for offset := start; offset+zipDirectoryHeaderLen <= end; {
+	for remaining := end - start; remaining >= zipDirectoryHeaderLen; {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if binary.LittleEndian.Uint32(raw[offset:]) != zipDirectoryHeaderSignature {
+		if _, err := io.ReadFull(headers, header[:]); err != nil {
+			return zipSourceError(err)
+		}
+		if binary.LittleEndian.Uint32(header[:]) != zipDirectoryHeaderSignature {
 			break
 		}
-		nameLen := int(binary.LittleEndian.Uint16(raw[offset+28:]))
-		extraLen := int(binary.LittleEndian.Uint16(raw[offset+30:]))
-		commentLen := int(binary.LittleEndian.Uint16(raw[offset+32:]))
-		recordLen := zipDirectoryHeaderLen + nameLen + extraLen + commentLen
-		if recordLen > end-offset {
+		nameLen := int(binary.LittleEndian.Uint16(header[28:]))
+		extraLen := int(binary.LittleEndian.Uint16(header[30:]))
+		commentLen := int(binary.LittleEndian.Uint16(header[32:]))
+		recordLen := int64(zipDirectoryHeaderLen + nameLen + extraLen + commentLen)
+		if recordLen > remaining {
 			return nil
 		}
 
@@ -106,63 +111,136 @@ func checkZipEntryCountLimitContext(ctx context.Context, raw []byte, limit int) 
 		if count > limit {
 			return fmt.Errorf("%w: count %d exceeds %d", ErrEntryLimit, count, limit)
 		}
-		offset += recordLen
+		if _, err := headers.Discard(nameLen + extraLen + commentLen); err != nil {
+			return zipSourceError(err)
+		}
+		remaining -= recordLen
 	}
 
 	return nil
 }
 
-func zipCentralDirectoryBounds(raw []byte) (int, int, bool) {
-	searchStart := len(raw) - zipDirectoryEndSearchWindow
-	if searchStart < 0 {
-		searchStart = 0
+// Search 1 KiB before 65 KiB, as archive/zip does; most archives have no comment.
+func zipDirectoryEndRecord(input io.ReaderAt, size int64) ([]byte, int64, bool, error) {
+	for _, window := range [...]int64{zipDirectoryEndShortWindow, zipDirectoryEndSearchWindow} {
+		tailStart := max(size-window, 0)
+		tail := make([]byte, size-tailStart)
+		if err := readZipSource(input, tail, tailStart); err != nil {
+			return nil, 0, false, err
+		}
+		for offset := len(tail) - zipDirectoryEndLen; offset >= 0; offset-- {
+			if binary.LittleEndian.Uint32(tail[offset:]) != zipDirectoryEndSignature {
+				continue
+			}
+			commentLen := int(binary.LittleEndian.Uint16(tail[offset+20:]))
+			if offset+zipDirectoryEndLen+commentLen > len(tail) {
+				continue
+			}
+			return tail[offset : offset+zipDirectoryEndLen], tailStart + int64(offset), true, nil
+		}
+		if tailStart == 0 {
+			break
+		}
+	}
+	return nil, 0, false, nil
+}
+
+func zipCentralDirectoryBounds(input io.ReaderAt, size int64) (int64, int64, bool, error) {
+	record, recordOffset, found, err := zipDirectoryEndRecord(input, size)
+	if err != nil || !found {
+		return 0, 0, false, err
 	}
 
-	for offset := len(raw) - zipDirectoryEndLen; offset >= searchStart; offset-- {
-		if binary.LittleEndian.Uint32(raw[offset:]) != zipDirectoryEndSignature {
-			continue
+	directoryEnd := recordOffset
+	directoryRecords := binary.LittleEndian.Uint16(record[10:])
+	directorySize := uint64(binary.LittleEndian.Uint32(record[12:]))
+	directoryOffset := uint64(binary.LittleEndian.Uint32(record[16:]))
+	if directoryRecords == zipDirectoryRecords64Marker ||
+		directorySize == zipDirectorySizeOffsetMarker ||
+		directoryOffset == zipDirectorySizeOffsetMarker {
+		recordOffset64, located, err := zip64LocatorOffset(input, recordOffset)
+		if err != nil {
+			return 0, 0, false, err
 		}
-		commentLen := int(binary.LittleEndian.Uint16(raw[offset+20:]))
-		if offset+zipDirectoryEndLen+commentLen > len(raw) {
-			continue
-		}
-
-		directoryEnd := offset
-		directoryRecords := binary.LittleEndian.Uint16(raw[offset+10:])
-		directorySize := uint64(binary.LittleEndian.Uint32(raw[offset+12:]))
-		directoryOffset := uint64(binary.LittleEndian.Uint32(raw[offset+16:]))
-		if directoryRecords == zipDirectoryRecords64Marker ||
-			directorySize == zipDirectorySizeOffsetMarker ||
-			directoryOffset == zipDirectorySizeOffsetMarker {
-			locatorOffset := offset - zipDirectory64LocatorLen
-			if locatorOffset < 0 || binary.LittleEndian.Uint32(raw[locatorOffset:]) != zipDirectory64LocSignature {
-				return 0, 0, false
+		// Without a locator, archive/zip keeps the classic values, so count with them too.
+		if located {
+			var ok bool
+			directoryEnd, directorySize, directoryOffset, ok, err = zip64DirectoryRecord(input, size, recordOffset64)
+			if err != nil || !ok {
+				return 0, 0, false, err
 			}
-			zip64Offset := binary.LittleEndian.Uint64(raw[locatorOffset+8:])
-			if len(raw) < zipDirectory64EndLen || zip64Offset > uint64(len(raw)-zipDirectory64EndLen) {
-				return 0, 0, false
-			}
-			directoryEnd = int(zip64Offset)
-			if binary.LittleEndian.Uint32(raw[directoryEnd:]) != zipDirectory64EndSignature {
-				return 0, 0, false
-			}
-			directorySize = binary.LittleEndian.Uint64(raw[directoryEnd+40:])
-			directoryOffset = binary.LittleEndian.Uint64(raw[directoryEnd+48:])
 		}
-
-		if directorySize > uint64(directoryEnd) {
-			return 0, 0, false
-		}
-		start := directoryEnd - int(directorySize)
-		if directoryOffset < uint64(directoryEnd)-directorySize &&
-			directoryOffset <= uint64(len(raw)-zipSignatureLen) &&
-			binary.LittleEndian.Uint32(raw[int(directoryOffset):]) == zipDirectoryHeaderSignature {
-			start = int(directoryOffset)
-		}
-		return start, directoryEnd, true
 	}
 
-	return 0, 0, false
+	if directorySize > uint64(directoryEnd) {
+		return 0, 0, false, nil
+	}
+	start := directoryEnd - int64(directorySize)
+	if directoryOffset < uint64(start) {
+		// ZIPs can have an executable prefix whose length is absent from offsets.
+		var signature [zipSignatureLen]byte
+		if err := readZipSource(input, signature[:], int64(directoryOffset)); err != nil {
+			return 0, 0, false, err
+		}
+		if binary.LittleEndian.Uint32(signature[:]) == zipDirectoryHeaderSignature {
+			start = int64(directoryOffset)
+		}
+	}
+	return start, directoryEnd, true, nil
+}
+
+// zip64LocatorOffset accepts the same locators as archive/zip: one disk, with
+// the ZIP64 end record on disk 0.
+func zip64LocatorOffset(input io.ReaderAt, endOffset int64) (uint64, bool, error) {
+	if endOffset < zipDirectory64LocatorLen {
+		return 0, false, nil
+	}
+	var locator [zipDirectory64LocatorLen]byte
+	if err := readZipSource(input, locator[:], endOffset-zipDirectory64LocatorLen); err != nil {
+		return 0, false, err
+	}
+	if binary.LittleEndian.Uint32(locator[:]) != zipDirectory64LocSignature ||
+		binary.LittleEndian.Uint32(locator[4:]) != 0 ||
+		binary.LittleEndian.Uint32(locator[16:]) != 1 {
+		return 0, false, nil
+	}
+	return binary.LittleEndian.Uint64(locator[8:]), true, nil
+}
+
+func zip64DirectoryRecord(input io.ReaderAt, size int64, recordOffset uint64) (int64, uint64, uint64, bool, error) {
+	if size < zipDirectory64EndLen || recordOffset > uint64(size-zipDirectory64EndLen) {
+		return 0, 0, 0, false, nil
+	}
+	var record [zipDirectory64EndLen]byte
+	if err := readZipSource(input, record[:], int64(recordOffset)); err != nil {
+		return 0, 0, 0, false, err
+	}
+	if binary.LittleEndian.Uint32(record[:]) != zipDirectory64EndSignature {
+		return 0, 0, 0, false, nil
+	}
+	directorySize := binary.LittleEndian.Uint64(record[40:])
+	directoryOffset := binary.LittleEndian.Uint64(record[48:])
+	return int64(recordOffset), directorySize, directoryOffset, true, nil
+}
+
+func readZipSource(input io.ReaderAt, p []byte, offset int64) error {
+	n, err := input.ReadAt(p, offset)
+	if err == io.EOF && n == len(p) {
+		return nil
+	}
+	if err != nil {
+		return zipSourceError(err)
+	}
+	return nil
+}
+
+// The size is trusted to bound every read, so EOF means the source is shorter
+// than the caller declared.
+func zipSourceError(err error) error {
+	if err == io.EOF {
+		err = io.ErrUnexpectedEOF
+	}
+	return fmt.Errorf("reading zip central directory: %w", err)
 }
 
 func (z *zipReader) List() ([]FileInfo, error) {

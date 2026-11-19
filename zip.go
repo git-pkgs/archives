@@ -54,7 +54,7 @@ func openZip(raw []byte) (*zipReader, error) {
 	if err != nil {
 		return nil, fmt.Errorf("opening zip: %w", err)
 	}
-	reader.RegisterDecompressor(zip.Deflate, newFlateReader)
+	registerZipDecompressors(reader)
 	if err := checkArchiveEntryCount(len(reader.File)); err != nil {
 		return nil, err
 	}

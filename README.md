@@ -335,7 +335,7 @@ for _, f := range result.Files {
 
 ## Supported formats
 
-- `.zip`, `.jar`, `.whl`, `.nupkg`, `.egg`, `.vsix` (ZIP-based)
+- `.zip`, `.jar`, `.whl`, `.nupkg`, `.egg`, `.vsix` (ZIP-based; members stored or compressed with Deflate, bzip2, zstd or xz)
 - `.tar`, `.tar.gz`, `.tgz`, `.crate`, `.tar.bz2`, `.tar.xz`, `.tar.zst`
 - gzip, bzip2, xz and zstd compressed single files, detected by content
 - `.gem` (Ruby gems with nested data.tar.gz)

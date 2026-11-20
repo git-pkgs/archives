@@ -50,7 +50,7 @@ func OpenStreamReaderAtContext(ctx context.Context, filename string, content io.
 	if len(reader.File) > options.MaxEntries {
 		return nil, ErrEntryLimit
 	}
-	reader.RegisterDecompressor(zip.Deflate, newFlateReader)
+	registerZipDecompressors(reader)
 	var source streamSource = &zipStream{ctx: ctx, reader: reader, skipUnread: true}
 	if format == formatConda {
 		source = &condaStream{outer: &Stream{ctx: ctx, source: source, options: containerOptions(options)}}

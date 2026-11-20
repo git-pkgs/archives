@@ -30,7 +30,7 @@ func newZipStream(ctx context.Context, raw []byte, options StreamOptions, conda 
 	if len(reader.File) > options.MaxEntries {
 		return nil, ErrEntryLimit
 	}
-	reader.RegisterDecompressor(zip.Deflate, newFlateReader)
+	registerZipDecompressors(reader)
 	z := &zipStream{ctx: ctx, reader: reader}
 	if conda {
 		return &condaStream{outer: &Stream{ctx: ctx, source: z, options: containerOptions(options)}}, nil

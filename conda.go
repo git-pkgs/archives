@@ -25,6 +25,7 @@ func openConda(raw []byte) (*tarReader, error) {
 	if err != nil {
 		return nil, fmt.Errorf("opening conda zip: %w", err)
 	}
+	registerZipDecompressors(zr)
 	if err := checkArchiveEntryCount(len(zr.File)); err != nil {
 		return nil, err
 	}

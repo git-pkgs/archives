@@ -20,28 +20,26 @@ var zipMethodPayload = []byte(strings.Repeat("archives zip method test\n", 50))
 // Go has no bzip2 encoder: bz2.compress(zipMethodPayload, 9) from CPython.
 const zipMethodPayloadBzip2 = "QlpoOTFBWSZTWb3KE+YAAHzRgAAQQAAuYt0QIABgKVU9TIaaeKFMABNMou0XpFlFwiyiyi0i9otIu0WEW0WkX5F4RbRaRbIsouUWEXCLCL+LuSKcKEhe5QnzAA=="
 
-// Method IDs from APPNOTE.TXT 4.4.5, spelled out so the test also builds
-// against a tree without the registrations.
 var zipMethods = []struct {
 	name   string
 	method uint16
 }{
-	{"bzip2", 12},
-	{"zstd", 93},
-	{"xz", 95},
+	{"bzip2", zipMethodBzip2},
+	{"zstd", zipMethodZstd},
+	{"xz", zipMethodXZ},
 }
 
 func compressForZip(t *testing.T, method uint16, payload []byte) []byte {
 	t.Helper()
 	var buf bytes.Buffer
 	switch method {
-	case 12:
+	case zipMethodBzip2:
 		raw, err := base64.StdEncoding.DecodeString(zipMethodPayloadBzip2)
 		if err != nil || !bytes.Equal(payload, zipMethodPayload) {
 			t.Fatalf("bzip2 fixture only covers zipMethodPayload: %v", err)
 		}
 		return raw
-	case 93:
+	case zipMethodZstd:
 		w, err := zstd.NewWriter(&buf)
 		if err != nil {
 			t.Fatal(err)
@@ -50,7 +48,7 @@ func compressForZip(t *testing.T, method uint16, payload []byte) []byte {
 		if err := w.Close(); err != nil {
 			t.Fatal(err)
 		}
-	case 95:
+	case zipMethodXZ:
 		w, err := xz.NewWriter(&buf)
 		if err != nil {
 			t.Fatal(err)

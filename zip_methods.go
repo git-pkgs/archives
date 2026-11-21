@@ -7,7 +7,6 @@ import (
 	"io"
 
 	"github.com/klauspost/compress/zstd"
-	"github.com/ulikunitz/xz"
 )
 
 // ZIP compression method IDs from APPNOTE.TXT 4.4.5.
@@ -17,8 +16,6 @@ const (
 	zipMethodXZ    uint16 = 95
 )
 
-// registerZipDecompressors gives every ZIP reader the same methods, so
-// buffered, streaming, random-access and browser access agree.
 func registerZipDecompressors(r *zip.Reader) {
 	r.RegisterDecompressor(zip.Deflate, newFlateReader)
 	r.RegisterDecompressor(zipMethodBzip2, newZipBzip2Reader)
@@ -39,7 +36,7 @@ func newZipZstdReader(r io.Reader) io.ReadCloser {
 }
 
 func newZipXZReader(r io.Reader) io.ReadCloser {
-	xr, err := xz.NewReader(r)
+	xr, err := newXZReader(r)
 	if err != nil {
 		return errReadCloser{fmt.Errorf("opening xz: %w", err)}
 	}

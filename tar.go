@@ -12,7 +12,6 @@ import (
 
 	"github.com/klauspost/compress/gzip"
 	"github.com/klauspost/compress/zstd"
-	"github.com/ulikunitz/xz"
 )
 
 var (
@@ -123,7 +122,7 @@ func tarContentReader(content io.Reader, compression string) (io.Reader, io.Clos
 	case compressionBzip2:
 		return bzip2.NewReader(content), nil, nil
 	case compressionXZ:
-		r, err := xz.NewReader(content)
+		r, err := newXZReader(content)
 		if err != nil {
 			return nil, nil, fmt.Errorf("opening xz: %w", err)
 		}

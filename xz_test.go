@@ -329,3 +329,32 @@ func TestCondaCompressedOuterMemberOpenStreamBytes(t *testing.T) {
 		})
 	}
 }
+
+func TestTarXZDictLimit(t *testing.T) {
+	tarball := createTestTar()
+	for _, code := range []byte{0, 30} {
+		data := xzTestStream(xzTestBlock{code, xzStoredLZMA2(tarball), tarball})
+
+		r, err := OpenBytes("test.tar.xz", data)
+		if err == nil {
+			_ = r.Close()
+		}
+		stream, serr := OpenStreamBytes("test.tar.xz", data, StreamOptions{})
+		if serr == nil {
+			_, serr = stream.Next()
+			_ = stream.Close()
+		}
+		if code == 0 {
+			if err != nil || serr != nil {
+				t.Fatalf("4 KiB dictionary: OpenBytes %v, stream %v", err, serr)
+			}
+			continue
+		}
+		if !errors.Is(err, ErrDecompressLimit) {
+			t.Fatalf("OpenBytes: %v, want ErrDecompressLimit", err)
+		}
+		if !errors.Is(serr, ErrDecompressLimit) {
+			t.Fatalf("stream: %v, want ErrDecompressLimit", serr)
+		}
+	}
+}

@@ -26,17 +26,9 @@ func newXZReader(r io.Reader) (*xz.Reader, error) {
 	return xz.NewReader(&xzDictGuard{r: r})
 }
 
-// xzDictGuard sits under the xz decoder and returns an error instead of
-// the last byte of any block header that declares a dictionary above
-// maxXZDictSize.
-//
-// It does not follow the LZMA2 chunk framing to find the headers.
-// ulikunitz/xz does not check that a chunk's packed bytes are all consumed,
-// so a parser that skips by packed size and the decoder can disagree about
-// where the next block header starts. The decoder only acts on block
-// headers at 4-aligned offsets with a valid CRC32, so the guard checks
-// every 4-aligned offset, holding back the last xzMaxBlockHeader-1 bytes
-// until the header that could start among them is complete.
+// xzDictGuard checks every 4-aligned offset instead of following the LZMA2
+// chunks, because ulikunitz/xz does not verify that a chunk's packed bytes
+// are all consumed.
 type xzDictGuard struct {
 	r      io.Reader
 	buf    []byte
@@ -128,10 +120,12 @@ func xzBlockHeaderDict(b []byte) int64 {
 		}
 		h = h[k:]
 	}
-	if len(h) < 3 || h[0] != 0x21 || h[1] != 1 {
+	// The decoder reads the filter ID as a varint, so 0xA1 0x00 is 0x21 too.
+	id, k := binary.Uvarint(h)
+	if k <= 0 || id != 0x21 || len(h) < k+2 || h[k] != 1 {
 		return 0
 	}
-	dict, err := lzma.DecodeDictCap(h[2])
+	dict, err := lzma.DecodeDictCap(h[k+1])
 	if err != nil {
 		return 0
 	}

@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"encoding/binary"
 	"errors"
 	"hash/crc32"
 	"io"
@@ -243,5 +244,109 @@ func TestZipMethodsBrowser(t *testing.T) {
 				t.Fatalf("got %d bytes, want %d", len(got), len(zipMethodPayload))
 			}
 		})
+	}
+}
+
+// zstdRawFrame stores p in raw blocks of at most 1 KiB, the smallest window,
+// after a frame header descriptor and window or content size bytes.
+func zstdRawFrame(header, p []byte) []byte {
+	out := append([]byte{0x28, 0xB5, 0x2F, 0xFD}, header...)
+	for {
+		n := min(len(p), 1<<10)
+		block := uint32(n) << 3 // raw block
+		if n == len(p) {
+			block |= 1 // last block
+		}
+		out = append(out, byte(block), byte(block>>8), byte(block>>16))
+		out = append(out, p[:n]...)
+		p = p[n:]
+		if len(p) == 0 {
+			return out
+		}
+	}
+}
+
+func TestZipZstdMemberWindowLimit(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		header []byte
+		want   error
+	}{
+		{"1 KiB window", []byte{0, 0x00}, nil},
+		{"128 MiB window", []byte{0, 0x88}, nil},
+		{"144 MiB window", []byte{0, 0x89}, zstd.ErrWindowSizeExceeded},
+		{"512 MiB window", []byte{0, 0x98}, zstd.ErrWindowSizeExceeded},
+		// A single-segment frame's window is its content size.
+		{"200 MiB single segment", binary.LittleEndian.AppendUint32([]byte{0xA0}, 200<<20), zstd.ErrDecoderSizeExceeded},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			frame := zstdRawFrame(tc.header, zipMethodPayload)
+			data := zipWithRawMember(t, "data.txt", zipMethodZstd, frame, len(zipMethodPayload))
+
+			r, err := OpenBytes("test.zip", data)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = r.Close() }()
+			var got []byte
+			rc, err := r.Extract("data.txt")
+			if err == nil {
+				got, err = io.ReadAll(rc)
+				_ = rc.Close()
+			}
+			if tc.want == nil {
+				if err != nil || !bytes.Equal(got, zipMethodPayload) {
+					t.Fatalf("Extract: %d bytes, %v", len(got), err)
+				}
+			} else if !errors.Is(err, tc.want) {
+				t.Fatalf("Extract: %v, want %v", err, tc.want)
+			}
+
+			// Next discards an unread member by decoding it.
+			stream, err := OpenStreamBytes("test.zip", data, StreamOptions{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = stream.Close() }()
+			if _, err := stream.Next(); err != nil {
+				t.Fatal(err)
+			}
+			want := tc.want
+			if want == nil {
+				want = io.EOF
+			}
+			if _, err := stream.Next(); !errors.Is(err, want) {
+				t.Fatalf("second Next: %v, want %v", err, want)
+			}
+		})
+	}
+}
+
+func TestTarZstdWindowLimit(t *testing.T) {
+	tarball := createTestTar()
+	for _, window := range []byte{0x00, 0x98} { // 1 KiB, 512 MiB
+		data := zstdRawFrame([]byte{0, window}, tarball)
+
+		r, err := OpenBytes("test.tar.zst", data)
+		if err == nil {
+			_ = r.Close()
+		}
+		stream, serr := OpenStreamBytes("test.tar.zst", data, StreamOptions{})
+		if serr == nil {
+			_, serr = stream.Next()
+			_ = stream.Close()
+		}
+		if window == 0x00 {
+			if err != nil || serr != nil {
+				t.Fatalf("1 KiB window: OpenBytes %v, stream %v", err, serr)
+			}
+			continue
+		}
+		if !errors.Is(err, zstd.ErrWindowSizeExceeded) {
+			t.Fatalf("OpenBytes: %v, want zstd.ErrWindowSizeExceeded", err)
+		}
+		if !errors.Is(serr, zstd.ErrWindowSizeExceeded) {
+			t.Fatalf("stream: %v, want zstd.ErrWindowSizeExceeded", serr)
+		}
 	}
 }

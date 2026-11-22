@@ -27,8 +27,17 @@ func newZipBzip2Reader(r io.Reader) io.ReadCloser {
 	return io.NopCloser(bzip2.NewReader(r))
 }
 
+// maxZstdWindow is the largest window a zstd frame may declare. The decoder
+// allocates the declared window, up to 512 MiB by default; zstd --ultra -22
+// uses 128 MiB.
+const maxZstdWindow = 128 << 20
+
+func newZstdReader(r io.Reader) (*zstd.Decoder, error) {
+	return zstd.NewReader(r, zstd.WithDecoderConcurrency(1), zstd.WithDecoderMaxWindow(maxZstdWindow))
+}
+
 func newZipZstdReader(r io.Reader) io.ReadCloser {
-	dec, err := zstd.NewReader(r, zstd.WithDecoderConcurrency(1))
+	dec, err := newZstdReader(r)
 	if err != nil {
 		return errReadCloser{fmt.Errorf("opening zstd: %w", err)}
 	}

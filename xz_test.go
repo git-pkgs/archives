@@ -358,3 +358,40 @@ func TestTarXZDictLimit(t *testing.T) {
 		}
 	}
 }
+
+// xzWithFilter replaces the 12-byte block header of a one-block stream
+// with one that spells the LZMA2 filter as filter.
+func xzWithFilter(stream, filter []byte) []byte {
+	header := append([]byte{2, 0}, filter...)
+	header = append(header, make([]byte, 8-len(header))...)
+	header = binary.LittleEndian.AppendUint32(header, crc32.ChecksumIEEE(header))
+	out := append([]byte(nil), stream[:12]...)
+	out = append(out, header...)
+	return append(out, stream[24:]...)
+}
+
+// ulikunitz/xz reads the filter ID as a varint, so an overlong 0x21 is
+// still LZMA2 and its dictionary still counts.
+func TestXZDictGuardOverlongFilterID(t *testing.T) {
+	for _, id := range [][]byte{{0xA1, 0x00}, {0xA1, 0x80, 0x00}} {
+		for _, code := range []byte{0, 30} {
+			stream := xzTestStream(xzTestBlock{code, xzStoredLZMA2(zipMethodPayload), zipMethodPayload})
+			data := xzWithFilter(stream, append(append([]byte(nil), id...), 1, code))
+			r, err := newXZReader(bytes.NewReader(data))
+			var got []byte
+			if err == nil {
+				got, err = io.ReadAll(r)
+			}
+			if code == 0 {
+				// The decoder accepts the header and decodes the block.
+				if err != nil || !bytes.Equal(got, zipMethodPayload) {
+					t.Fatalf("id % x, 4 KiB dictionary: %d bytes, %v", id, len(got), err)
+				}
+				continue
+			}
+			if !errors.Is(err, ErrDecompressLimit) {
+				t.Fatalf("id % x, 128 MiB dictionary: %v, want ErrDecompressLimit", id, err)
+			}
+		}
+	}
+}

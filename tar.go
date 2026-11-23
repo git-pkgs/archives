@@ -127,11 +127,11 @@ func tarContentReader(content io.Reader, compression string) (io.Reader, io.Clos
 		}
 		return r, nil, nil
 	case compressionZstd:
-		dec, err := newZstdReader(content)
+		zr, err := newZstdReader(content)
 		if err != nil {
 			return nil, nil, fmt.Errorf("opening zstd: %w", err)
 		}
-		return dec, dec.IOReadCloser(), nil
+		return zr, zr, nil
 	default:
 		return content, nil, nil
 	}

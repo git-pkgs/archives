@@ -3,6 +3,7 @@ package archives
 import (
 	"archive/zip"
 	"compress/bzip2"
+	"errors"
 	"fmt"
 	"io"
 
@@ -32,16 +33,37 @@ func newZipBzip2Reader(r io.Reader) io.ReadCloser {
 // uses 128 MiB.
 const maxZstdWindow = 128 << 20
 
-func newZstdReader(r io.Reader) (*zstd.Decoder, error) {
-	return zstd.NewReader(r, zstd.WithDecoderConcurrency(1), zstd.WithDecoderMaxWindow(maxZstdWindow))
+func newZstdReader(r io.Reader) (io.ReadCloser, error) {
+	dec, err := zstd.NewReader(r, zstd.WithDecoderConcurrency(1), zstd.WithDecoderMaxWindow(maxZstdWindow))
+	if err != nil {
+		return nil, err
+	}
+	return zstdReader{dec}, nil
+}
+
+// zstdReader reports a frame over maxZstdWindow as ErrDecompressLimit, like
+// an xz dictionary over maxXZDictSize.
+type zstdReader struct{ dec *zstd.Decoder }
+
+func (z zstdReader) Read(p []byte) (int, error) {
+	n, err := z.dec.Read(p)
+	if errors.Is(err, zstd.ErrWindowSizeExceeded) || errors.Is(err, zstd.ErrDecoderSizeExceeded) {
+		err = fmt.Errorf("%w: %w", ErrDecompressLimit, err)
+	}
+	return n, err
+}
+
+func (z zstdReader) Close() error {
+	z.dec.Close()
+	return nil
 }
 
 func newZipZstdReader(r io.Reader) io.ReadCloser {
-	dec, err := newZstdReader(r)
+	zr, err := newZstdReader(r)
 	if err != nil {
 		return errReadCloser{fmt.Errorf("opening zstd: %w", err)}
 	}
-	return dec.IOReadCloser()
+	return zr
 }
 
 func newZipXZReader(r io.Reader) io.ReadCloser {

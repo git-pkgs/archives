@@ -298,8 +298,8 @@ func TestZipZstdMemberWindowLimit(t *testing.T) {
 				if err != nil || !bytes.Equal(got, zipMethodPayload) {
 					t.Fatalf("Extract: %d bytes, %v", len(got), err)
 				}
-			} else if !errors.Is(err, tc.want) {
-				t.Fatalf("Extract: %v, want %v", err, tc.want)
+			} else if !errors.Is(err, ErrDecompressLimit) || !errors.Is(err, tc.want) {
+				t.Fatalf("Extract: %v, want ErrDecompressLimit and %v", err, tc.want)
 			}
 
 			// Next discards an unread member by decoding it.
@@ -311,12 +311,13 @@ func TestZipZstdMemberWindowLimit(t *testing.T) {
 			if _, err := stream.Next(); err != nil {
 				t.Fatal(err)
 			}
-			want := tc.want
-			if want == nil {
-				want = io.EOF
-			}
-			if _, err := stream.Next(); !errors.Is(err, want) {
-				t.Fatalf("second Next: %v, want %v", err, want)
+			_, err = stream.Next()
+			if tc.want == nil {
+				if err != io.EOF {
+					t.Fatalf("second Next: %v, want EOF", err)
+				}
+			} else if !errors.Is(err, ErrDecompressLimit) || !errors.Is(err, tc.want) {
+				t.Fatalf("second Next: %v, want ErrDecompressLimit and %v", err, tc.want)
 			}
 		})
 	}
@@ -342,11 +343,73 @@ func TestTarZstdWindowLimit(t *testing.T) {
 			}
 			continue
 		}
-		if !errors.Is(err, zstd.ErrWindowSizeExceeded) {
-			t.Fatalf("OpenBytes: %v, want zstd.ErrWindowSizeExceeded", err)
+		for name, err := range map[string]error{"OpenBytes": err, "stream": serr} {
+			if !errors.Is(err, ErrDecompressLimit) || !errors.Is(err, zstd.ErrWindowSizeExceeded) {
+				t.Fatalf("%s: %v, want ErrDecompressLimit and zstd.ErrWindowSizeExceeded", name, err)
+			}
 		}
-		if !errors.Is(serr, zstd.ErrWindowSizeExceeded) {
-			t.Fatalf("stream: %v, want zstd.ErrWindowSizeExceeded", serr)
+	}
+}
+
+// zipWithLimitedMember holds an over-limit member followed by a valid one.
+func zipWithLimitedMember(t *testing.T, method uint16, compressed []byte) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	w, err := zw.CreateRaw(&zip.FileHeader{
+		Name:               "big",
+		Method:             method,
+		CRC32:              crc32.ChecksumIEEE(zipMethodPayload),
+		CompressedSize64:   uint64(len(compressed)),
+		UncompressedSize64: uint64(len(zipMethodPayload)),
+	})
+	if err == nil {
+		_, err = w.Write(compressed)
+	}
+	if err == nil {
+		w, err = zw.CreateHeader(&zip.FileHeader{Name: "valid", Method: zip.Store})
+	}
+	if err == nil {
+		_, err = w.Write([]byte("valid"))
+	}
+	if err == nil {
+		err = zw.Close()
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
+}
+
+func TestStreamRecoverKeepsDecompressLimit(t *testing.T) {
+	members := map[string][]byte{
+		"zstd": zipWithLimitedMember(t, zipMethodZstd, zstdRawFrame([]byte{0, 0x98}, zipMethodPayload)),
+		"xz":   zipWithLimitedMember(t, zipMethodXZ, xzTestStream(xzTestBlock{30, xzStoredLZMA2(zipMethodPayload), zipMethodPayload})),
+	}
+	for name, data := range members {
+		for _, read := range []bool{false, true} {
+			s, err := OpenStreamBytes("test.zip", data, StreamOptions{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if entry, err := s.Next(); err != nil || entry.Path != "big" {
+				t.Fatalf("%s: first Next: %+v %v", name, entry, err)
+			}
+			if read {
+				_, err = io.ReadAll(s)
+			} else {
+				_, err = s.Next()
+			}
+			if !errors.Is(err, ErrDecompressLimit) {
+				t.Fatalf("%s read=%v: member error %v, want ErrDecompressLimit", name, read, err)
+			}
+			if err := s.Recover(); !errors.Is(err, ErrDecompressLimit) {
+				t.Fatalf("%s read=%v: Recover %v, want ErrDecompressLimit", name, read, err)
+			}
+			if entry, err := s.Next(); !errors.Is(err, ErrDecompressLimit) {
+				t.Fatalf("%s read=%v: Next after Recover: %+v %v, want ErrDecompressLimit", name, read, entry, err)
+			}
+			_ = s.Close()
 		}
 	}
 }

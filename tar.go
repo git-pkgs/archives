@@ -11,8 +11,6 @@ import (
 	"strings"
 
 	"github.com/klauspost/compress/gzip"
-	"github.com/klauspost/compress/zstd"
-	"github.com/ulikunitz/xz"
 )
 
 var (
@@ -123,17 +121,17 @@ func tarContentReader(content io.Reader, compression string) (io.Reader, io.Clos
 	case compressionBzip2:
 		return bzip2.NewReader(content), nil, nil
 	case compressionXZ:
-		r, err := xz.NewReader(content)
+		r, err := newXZReader(content)
 		if err != nil {
 			return nil, nil, fmt.Errorf("opening xz: %w", err)
 		}
 		return r, nil, nil
 	case compressionZstd:
-		dec, err := zstd.NewReader(content, zstd.WithDecoderConcurrency(1))
+		zr, err := newZstdReader(content)
 		if err != nil {
 			return nil, nil, fmt.Errorf("opening zstd: %w", err)
 		}
-		return dec, dec.IOReadCloser(), nil
+		return zr, zr, nil
 	default:
 		return content, nil, nil
 	}
